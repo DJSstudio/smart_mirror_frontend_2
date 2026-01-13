@@ -1,3 +1,5 @@
+Change the name of folder to smart_mirror_flutter
+
 # smart_mirror_flutter
 
 A new Flutter project.
