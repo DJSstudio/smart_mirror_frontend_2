@@ -1,7 +1,6 @@
 package com.example.smart_mirror_flutter
 
-import android.app.Presentation
-import android.content.Context
+import android.app.Activity
 import android.graphics.Color
 import android.media.MediaPlayer
 import android.net.Uri
@@ -12,10 +11,28 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.VideoView
 
-class MirrorPresentation(
-    context: Context,
-    display: android.view.Display
-) : Presentation(context, display) {
+class MirrorActivity : Activity() {
+
+    companion object {
+        const val EXTRA_MODE = "mode"
+        const val EXTRA_LEFT = "left"
+        const val EXTRA_RIGHT = "right"
+        const val EXTRA_TARGET_DISPLAY_ID = "target_display_id"
+
+        const val MODE_IDLE = "idle"
+        const val MODE_PLAY = "play"
+        const val MODE_COMPARE = "compare"
+
+        @Volatile
+        private var activeInstance: MirrorActivity? = null
+
+        fun finishIfRunning() {
+            activeInstance?.finish()
+        }
+    }
+
+    private val prefsName = "mirror_status"
+    private val prefsKey = "last_status"
 
     private lateinit var root: FrameLayout
     private var singleView: VideoView? = null
@@ -26,24 +43,76 @@ class MirrorPresentation(
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeInstance = this
+        if (!ensureTargetDisplay()) {
+            saveStatus("start_failed: wrong_display actual=${display?.displayId} target=${intent.getIntExtra(EXTRA_TARGET_DISPLAY_ID, -1)}")
+            finish()
+            return
+        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
 
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        root = FrameLayout(context)
+        root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
         setContentView(root)
+
+        applyIntent()
     }
 
-    fun showIdle() {
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (!ensureTargetDisplay()) {
+            saveStatus("update_failed: wrong_display actual=${display?.displayId} target=${intent.getIntExtra(EXTRA_TARGET_DISPLAY_ID, -1)}")
+            finish()
+            return
+        }
+        applyIntent()
+    }
+
+    private fun applyIntent() {
+        val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_IDLE
+        saveStatus("mode=$mode display=${display?.displayId}")
+        when (mode) {
+            MODE_PLAY -> playVideo(intent.getStringExtra(EXTRA_LEFT))
+            MODE_COMPARE -> compareVideos(
+                intent.getStringExtra(EXTRA_LEFT),
+                intent.getStringExtra(EXTRA_RIGHT)
+            )
+            else -> showIdle()
+        }
+    }
+
+    private fun saveStatus(text: String) {
+        getSharedPreferences(prefsName, MODE_PRIVATE)
+            .edit()
+            .putString(prefsKey, text)
+            .apply()
+    }
+
+    private fun ensureTargetDisplay(): Boolean {
+        val targetId = intent.getIntExtra(EXTRA_TARGET_DISPLAY_ID, -1)
+        val actualId = display?.displayId ?: -1
+        if (targetId == -1) {
+            return false
+        }
+        return actualId == targetId
+    }
+
+    private fun showIdle() {
         clearPlayers()
         root.setBackgroundColor(Color.BLACK)
     }
 
-    fun playVideo(source: String) {
+    private fun playVideo(source: String?) {
+        if (source.isNullOrBlank()) {
+            showIdle()
+            return
+        }
         clearPlayers()
         root.setBackgroundColor(Color.BLACK)
 
-        val view = VideoView(context)
+        val view = VideoView(this)
         view.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -58,19 +127,24 @@ class MirrorPresentation(
         }
     }
 
-    fun compareVideos(left: String, right: String) {
+    private fun compareVideos(left: String?, right: String?) {
+        if (left.isNullOrBlank() || right.isNullOrBlank()) {
+            showIdle()
+            return
+        }
+
         clearPlayers()
         root.setBackgroundColor(Color.BLACK)
 
-        val row = LinearLayout(context)
+        val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         )
 
-        val leftVideo = VideoView(context)
-        val rightVideo = VideoView(context)
+        val leftVideo = VideoView(this)
+        val rightVideo = VideoView(this)
         leftVideo.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         rightVideo.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
 
@@ -133,8 +207,12 @@ class MirrorPresentation(
         rightPrepared = false
     }
 
-    override fun onStop() {
+    override fun onDestroy() {
         clearPlayers()
-        super.onStop()
+        saveStatus("closed display=${display?.displayId}")
+        if (activeInstance === this) {
+            activeInstance = null
+        }
+        super.onDestroy()
     }
 }

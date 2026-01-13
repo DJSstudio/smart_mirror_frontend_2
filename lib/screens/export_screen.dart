@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../api/api_provider.dart';
+import '../services/device_service.dart';
 import '../state/session_provider.dart';
 
 class ExportScreen extends ConsumerStatefulWidget {
@@ -28,6 +29,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
     if (session == null) return;
 
+    // Request export token - backend will use session's device_id
     final res = await api.post(
       "/export/token",
       body: {

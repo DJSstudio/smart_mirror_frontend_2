@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:ui';
 import 'screens/qr_display_screen.dart';
 import 'screens/recording_screen.dart';
 import 'screens/gallery_screen.dart';
@@ -9,9 +10,25 @@ import 'screens/mirror_qr_screen.dart';
 import 'screens/active_session_screen.dart';
 import 'screens/video_player_screen.dart';
 import 'screens/export_screen.dart';
+import 'screens/hdmi_debug_screen.dart';
+import 'utils/error_logger.dart';
 
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    final stack = details.stack;
+    final msg = [
+      details.exceptionAsString(),
+      if (stack != null) stack.toString(),
+    ].join('\n');
+    ErrorLogger.log(msg);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorLogger.log('$error\n$stack');
+    return false;
+  };
   runApp(const ProviderScope(child: SmartMirrorApp()));
 }
 
@@ -36,6 +53,7 @@ class SmartMirrorApp extends StatelessWidget {
         "/menu": (ctx) => const ActiveSessionScreen(),
         "/login": (context) => const QRDisplayScreen(),
         "/record": (c) => const RecordingScreen(),
+        "/hdmi_debug": (_) => const HdmiDebugScreen(),
         "/gallery": (context) {
           final args = ModalRoute.of(context)!.settings.arguments as Map;
           return GalleryScreen(sessionId: args["session_id"]);

@@ -6,6 +6,8 @@ class VideoModel {
   final bool encrypted;
   final String fileUrl;
   final DateTime createdAt;
+  final double? durationSeconds;
+  final String? thumbnailUrl;
 
   VideoModel({
     required this.id,
@@ -15,6 +17,8 @@ class VideoModel {
     required this.encrypted,
     required this.fileUrl,
     required this.createdAt,
+    this.durationSeconds,
+    this.thumbnailUrl,
   });
 
   factory VideoModel.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,8 @@ class VideoModel {
       encrypted: json["encrypted"],
       fileUrl: json["file_url"],
       createdAt: DateTime.parse(json["created_at"]),
+      durationSeconds: json["duration_seconds"]?.toDouble(),
+      thumbnailUrl: json["thumbnail_url"],
     );
   }
 }

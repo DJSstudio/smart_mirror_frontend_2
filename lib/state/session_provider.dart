@@ -94,6 +94,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_provider.dart';
+import '../services/device_service.dart';
 
 /// ----------------------------
 /// MODEL
@@ -102,11 +103,13 @@ class MirrorSession {
   final String id;
   final String qrUrl;
   final String qrStatus;
+  final String? qrToken;  // Store raw QR token for reactivation
 
   MirrorSession({
     required this.id,
     required this.qrUrl,
     required this.qrStatus,
+    this.qrToken,
   });
 
   factory MirrorSession.fromJson(Map<String, dynamic> j) {
@@ -114,6 +117,7 @@ class MirrorSession {
       id: j["session_id"] ?? j["id"],
       qrUrl: j["qr_url"] ?? "",
       qrStatus: j["qr_status"] ?? "pending",
+      qrToken: j["qr_token"],
     );
   }
 }
@@ -132,6 +136,7 @@ class SessionNotifier extends StateNotifier<MirrorSession?> {
     _pollTimer?.cancel();
     _pollTimer = null;
     state = null;
+    ref.read(sessionErrorProvider.notifier).state = null;
 
     await _createQrSession();
   }
@@ -141,10 +146,48 @@ class SessionNotifier extends StateNotifier<MirrorSession?> {
     final api = ref.read(apiClientProvider);
 
     final res = await api.post("/session/qr/create");
-    if (!res.ok) return;
+    if (!res.ok) {
+      ref.read(sessionErrorProvider.notifier).state =
+          "Failed to create QR session (${res.status})";
+      return;
+    }
 
     state = MirrorSession.fromJson(res.data);
+    ref.read(sessionErrorProvider.notifier).state = null;
     _startPolling();
+  }
+
+  /// Activate session with QR token (when scanned on phone)
+  /// This gets the device_id and sends it to the backend
+  Future<bool> activateWithQrToken(String token) async {
+    try {
+      // Get or create device_id for this device
+      final deviceId = await DeviceService.getOrCreateDeviceId();
+      
+      final api = ref.read(apiClientProvider);
+      final res = await api.get(
+        "/qr/activate?token=$token&device_id=$deviceId",
+      );
+
+      if (!res.ok) {
+        print("❌ Failed to activate QR: ${res.status}");
+        return false;
+      }
+
+      // Update session state with activated session
+      final sessionId = res.data["session_id"];
+      state = MirrorSession(
+        id: sessionId,
+        qrUrl: "",
+        qrStatus: "active",
+      );
+
+      print("✅ QR activated with device_id: $deviceId");
+      return true;
+    } catch (e) {
+      print("❌ Error activating QR: $e");
+      return false;
+    }
   }
 
   /// Poll QR status
@@ -158,7 +201,11 @@ class SessionNotifier extends StateNotifier<MirrorSession?> {
       final res =
           await api.get("/session/qr/status?id=${state!.id}");
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        ref.read(sessionErrorProvider.notifier).state =
+            "Failed to check QR status (${res.status})";
+        return;
+      }
 
       final updatedStatus = res.data["qr_status"];
 
@@ -189,3 +236,5 @@ final sessionProvider =
     StateNotifierProvider<SessionNotifier, MirrorSession?>(
   (ref) => SessionNotifier(ref),
 );
+
+final sessionErrorProvider = StateProvider<String?>((ref) => null);

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../peers/peer_discovery_service.dart';
 import '../peers/peer_model.dart';
 import '../utils/env.dart';
 import '../api/client_provider.dart';
+import '../services/base_url_service.dart';
 
 final peerDiscoveryProvider = Provider<PeerDiscoveryService>((ref) {
   // Replace these values with your local mirror id + hostname
@@ -40,5 +42,6 @@ final activeMirrorSyncProvider = Provider<void>((ref) {
     Env.updateBaseUrl(peer.baseUrl);
     final apiClient = ref.read(apiClientProvider);
     apiClient.updateBaseUrl(peer.baseUrl);
+    unawaited(BaseUrlService.saveBaseUrl(peer.baseUrl));
   }
 });

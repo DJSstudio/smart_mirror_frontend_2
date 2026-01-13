@@ -6,11 +6,15 @@ class MirrorVideo {
   final String id;
   final String url;
   final int size;
+  final double? durationSeconds;
+  final String? thumbnailUrl;
 
   MirrorVideo({
     required this.id,
     required this.url,
     required this.size,
+    this.durationSeconds,
+    this.thumbnailUrl,
   });
 
   // factory MirrorVideo.fromJson(Map<String, dynamic> j) {
@@ -21,14 +25,15 @@ class MirrorVideo {
   //   );
   // }
   factory MirrorVideo.fromJson(Map<String, dynamic> j) {
-    final file = j["file"] as String;
+    // Use file_url which is computed by Django with build_absolute_uri
+    final fileUrl = j["file_url"] ?? j["file"] as String;
 
     return MirrorVideo(
-      id: j["id"],
-      url: file.startsWith("http")
-          ? file
-          : "http://192.168.1.8:8000$file",
-      size: j["size_bytes"] ?? 0,
+        id: j["id"],
+        url: fileUrl,
+        size: j["size_bytes"] ?? 0,
+        durationSeconds: j["duration_seconds"]?.toDouble(),
+        thumbnailUrl: j["thumbnail_url"],
     );
   }
 }

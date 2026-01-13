@@ -13,8 +13,10 @@ class MirrorQRScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text("Smart Mirror - Scan to Connect")),
-      body: Center(
-        child: session == null
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Center(
+            child: session == null
             ? ElevatedButton(
                 onPressed: () async {
                   await ref
@@ -34,6 +36,8 @@ class MirrorQRScreen extends ConsumerWidget {
                   ),
                 ],
               ),
+          ),
+        ),
       ),
     );
   }

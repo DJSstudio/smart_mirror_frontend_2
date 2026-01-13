@@ -159,6 +159,16 @@ class ActiveSessionScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              TextButton(
+                onPressed: () => Navigator.pushNamed(context, "/hdmi_debug"),
+                child: const Text(
+                  "HDMI Debug",
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
             ],
           ),
         ),

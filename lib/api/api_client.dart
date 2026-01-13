@@ -11,7 +11,7 @@ class ApiClient {
   ApiClient() {
     dio = Dio(
       BaseOptions(
-        baseUrl: Env.baseUrl,   // Example: http://192.168.1.5:8000/api
+        baseUrl: Env.baseUrl,
         connectTimeout: const Duration(seconds: 5),
         receiveTimeout: const Duration(seconds: 10),
         headers: {"Content-Type": "application/json"},
@@ -21,6 +21,9 @@ class ApiClient {
 
   // Basic GET wrapper
   Future<ApiResponse> get(String path) async {
+    if (dio.options.baseUrl.isEmpty) {
+      return ApiResponse.error("Base URL not set", 0);
+    }
     try {
       final r = await dio.get(path);
       return ApiResponse.success(r.data, r.statusCode ?? 200);
@@ -31,6 +34,9 @@ class ApiClient {
 
   // Basic POST wrapper
   Future<ApiResponse> post(String path, {Map<String, dynamic>? body}) async {
+    if (dio.options.baseUrl.isEmpty) {
+      return ApiResponse.error("Base URL not set", 0);
+    }
     try {
       final r = await dio.post(path, data: body ?? {});
       return ApiResponse.success(r.data, r.statusCode ?? 200);

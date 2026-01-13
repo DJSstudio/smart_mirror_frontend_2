@@ -19,7 +19,7 @@ class PeerDiscoveryService {
     required this.hostname,
     this.announcePort = 5005,
     this.listenPort = 5005,
-    this.announceIntervalSeconds = 3,
+    this.announceIntervalSeconds = 10,
   });
 
   /// Start listening + broadcasting
@@ -56,7 +56,11 @@ class PeerDiscoveryService {
     try {
       final payload = utf8.decode(datagram.data);
       final map = json.decode(payload) as Map<String, dynamic>;
-      final peer = Peer.fromJson(map);
+      final resolvedIp = _resolveIp(map["ip"], datagram.address.address);
+      final peer = Peer.fromJson({
+        ...map,
+        if (resolvedIp != null) "ip": resolvedIp,
+      });
 
       // Ignore our own announcements
       if (peer.mirrorId == localMirrorId) return;
@@ -67,6 +71,23 @@ class PeerDiscoveryService {
     } catch (e) {
       // ignore parse errors
     }
+  }
+
+  String? _resolveIp(dynamic rawIp, String fallback) {
+    if (rawIp is String && _isValidIp(rawIp)) {
+      return rawIp;
+    }
+    if (_isValidIp(fallback)) {
+      return fallback;
+    }
+    return null;
+  }
+
+  bool _isValidIp(String value) {
+    if (value.isEmpty) return false;
+    if (value == "0.0.0.0") return false;
+    if (value.startsWith("127.")) return false;
+    return InternetAddress.tryParse(value) != null;
   }
 
   Future<void> _broadcastPresence() async {
@@ -126,12 +147,12 @@ class PeerDiscoveryService {
     return null;
   }
 
-  // Remove peers not seen in last 15 seconds
+  // Remove peers not seen in last 30 seconds
   void _cleanupStalePeers() {
     final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
     final stale = <String>[];
     _peers.forEach((k, v) {
-      if (now - v.lastSeenUnix > 15) stale.add(k);
+      if (now - v.lastSeenUnix > 30) stale.add(k);
     });
     for (final k in stale) _peers.remove(k);
   }

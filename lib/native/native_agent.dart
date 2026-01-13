@@ -47,6 +47,94 @@ class NativeAgent {
     }
   }
 
+  static Future<bool> compareOnMirror(String left, String right) async {
+    try {
+      final res = await _channel.invokeMethod<bool>(
+        'compareOnMirror',
+        {'left': left, 'right': right},
+      );
+      return res ?? false;
+    } catch (e) {
+      print('compareOnMirror error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> showMirrorIdle() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('showMirrorIdle');
+      return res ?? false;
+    } catch (e) {
+      print('showMirrorIdle error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> hideMirror() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('hideMirror');
+      return res ?? false;
+    } catch (e) {
+      print('hideMirror error: $e');
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getDisplayInfo() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getDisplayInfo');
+      if (res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+      return {};
+    } catch (e) {
+      print('getDisplayInfo error: $e');
+      return {};
+    }
+  }
+
+  static Future<String?> getLastCrash() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getLastCrash');
+      if (res is String) {
+        return res;
+      }
+      return null;
+    } catch (e) {
+      print('getLastCrash error: $e');
+      return null;
+    }
+  }
+
+  static Future<void> clearLastCrash() async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearLastCrash');
+    } catch (e) {
+      print('clearLastCrash error: $e');
+    }
+  }
+
+  static Future<String?> getMirrorStatus() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getMirrorStatus');
+      if (res is String) {
+        return res;
+      }
+      return null;
+    } catch (e) {
+      print('getMirrorStatus error: $e');
+      return null;
+    }
+  }
+
+  static Future<void> clearMirrorStatus() async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearMirrorStatus');
+    } catch (e) {
+      print('clearMirrorStatus error: $e');
+    }
+  }
+
   static Future<String?> getLastRecorded() async {
     try {
       final path = await _channel.invokeMethod<String>('getLastRecorded');

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/gallery_provider.dart';
-import 'video_preview_mock_screen.dart';
-import 'compare_screen_mock.dart';
+import 'video_player_screen.dart';
+import 'compare_screen.dart';
 
 class GalleryScreen extends ConsumerStatefulWidget {
   final String sessionId;
@@ -37,6 +37,15 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     });
   }
 
+  String _formatDuration(double? seconds) {
+    if (seconds == null) return "N/A";
+    int totalSeconds = seconds.toInt();
+    int hours = totalSeconds ~/ 3600;
+    int minutes = (totalSeconds % 3600) ~/ 60;
+    int secs = totalSeconds % 60;
+    return "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
+  }
+
   @override
   Widget build(BuildContext context) {
     final videos = ref.watch(galleryProvider);
@@ -44,11 +53,22 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Gallery"),
+        actions: [
+          if (_selectedVideoIds.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() => _selectedVideoIds.clear()),
+              child: const Text(
+                "Clear",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+        ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: videos.isEmpty
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: videos.isEmpty
                 ? const Center(child: Text("No videos recorded"))
                 : ListView.builder(
                     itemCount: videos.length,
@@ -79,11 +99,48 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                                       color: Colors.grey.shade900,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.play_circle_outline,
-                                        size: 64,
-                                        color: Colors.white70,
+                                    child: v.thumbnailUrl != null
+                                        ? Image.network(
+                                            v.thumbnailUrl!,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (context, error, stackTrace) {
+                                              return Center(
+                                                child: Icon(
+                                                  Icons.play_circle_outline,
+                                                  size: 64,
+                                                  color: Colors.white70,
+                                                ),
+                                              );
+                                            },
+                                          )
+                                        : const Center(
+                                            child: Icon(
+                                              Icons.play_circle_outline,
+                                              size: 64,
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                  ),
+                                  // Duration Badge
+                                  Positioned(
+                                    bottom: 8,
+                                    left: 8,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.7),
+                                        borderRadius:
+                                            BorderRadius.circular(4),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      child: Text(
+                                        _formatDuration(v.durationSeconds),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -113,7 +170,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                                     fontWeight: FontWeight.w600),
                               ),
                               Text(
-                                "${v.size ~/ 1024} KB",
+                                "${v.size ~/ 1024} KB • ${_formatDuration(v.durationSeconds)}",
                                 style: const TextStyle(
                                     color: Colors.grey),
                               ),
@@ -132,8 +189,8 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (_) =>
-                                                VideoPreviewMockScreen(
-                                                    videoId: v.id),
+                                                MirrorVideoPlayerScreen(
+                                                    videoUrl: v.url),
                                           ),
                                         );
                                       },
@@ -160,29 +217,55 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                       );
                     },
                   ),
-          ),
+            ),
 
-          // COMPARE CTA
-          if (_selectedVideoIds.length == 2)
+            // COMPARE CTA
+            if (_selectedVideoIds.length == 2)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.compare),
+                    label: const Text("Compare Selected Videos"),
+                    onPressed: () {
+                      // Get the selected video URLs
+                      final allVideos = ref.read(galleryProvider);
+                      final selectedVideos = allVideos
+                          .where((v) => _selectedVideoIds.contains(v.id))
+                          .toList();
+                      
+                      if (selectedVideos.length == 2) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CompareScreen(
+                              leftPath: selectedVideos[0].url,
+                              rightPath: selectedVideos[1].url,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: SizedBox(
                 width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.compare),
-                  label: const Text("Compare Selected Videos"),
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.download),
+                  label: const Text("Export"),
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CompareScreenMock(),
-                      ),
-                    );
+                    Navigator.pushNamed(context, "/export");
                   },
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
