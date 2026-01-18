@@ -88,6 +88,24 @@ extension VideoApi on ApiClient {
     return await get("/videos/list?session_id=$sessionId");
   }
 
+  Future<ApiResponse> uploadVideoFile(String sessionId, String filePath,
+      {String? filename}) async {
+    try {
+      final form = FormData.fromMap({
+        "session_id": sessionId,
+        "file": await MultipartFile.fromFile(
+          filePath,
+          filename: filename,
+        ),
+      });
+
+      final r = await dio.post("/videos/upload", data: form);
+      return ApiResponse.success(r.data, r.statusCode ?? 200);
+    } catch (e) {
+      return ApiResponse.error("$e", 500);
+    }
+  }
+
   Future<ApiResponse> deleteVideo(String videoId) async {
     return await post("/videos/delete", body: {"id": videoId});
   }

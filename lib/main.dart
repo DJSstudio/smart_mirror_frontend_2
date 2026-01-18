@@ -11,6 +11,7 @@ import 'screens/active_session_screen.dart';
 import 'screens/video_player_screen.dart';
 import 'screens/export_screen.dart';
 import 'screens/hdmi_debug_screen.dart';
+import 'screens/continue_session_screen.dart';
 import 'utils/error_logger.dart';
 
 
@@ -50,6 +51,7 @@ class SmartMirrorApp extends StatelessWidget {
       // initialRoute: "/login",
       routes: {
         '/mirrors': (c) => const MirrorListScreen(),
+        '/continue_session': (c) => const ContinueSessionScreen(),
         "/menu": (ctx) => const ActiveSessionScreen(),
         "/login": (context) => const QRDisplayScreen(),
         "/record": (c) => const RecordingScreen(),

@@ -222,6 +222,14 @@ class SessionNotifier extends StateNotifier<MirrorSession?> {
     });
   }
 
+  void setActiveSession(String sessionId) {
+    state = MirrorSession(
+      id: sessionId,
+      qrUrl: "",
+      qrStatus: "active",
+    );
+  }
+
   @override
   void dispose() {
     _pollTimer?.cancel();

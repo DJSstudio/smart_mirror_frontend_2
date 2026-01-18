@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -6,6 +7,9 @@ import '../native/native_agent.dart';
 import '../utils/error_logger.dart';
 import '../api/client_provider.dart';
 import '../services/base_url_service.dart';
+import '../services/session_transfer_service.dart';
+import '../state/peers_state.dart';
+import '../peers/peer_model.dart';
 
 class QRDisplayScreen extends ConsumerStatefulWidget {
   const QRDisplayScreen({super.key});
@@ -23,6 +27,7 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
   bool _discovering = false;
   String? _discoveryError;
   String? _discoveryDebug;
+  bool _handlingActivation = false;
 
   Future<void> _showDisplayDebug() async {
     if (_debugOpen || !mounted) return;
@@ -148,6 +153,115 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
     });
   }
 
+  Future<void> _handleActivatedSession(String sessionId) async {
+    if (_handlingActivation) return;
+    _handlingActivation = true;
+    final transferred = await _attemptAutoTransfer(sessionId);
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, "/menu");
+    if (!transferred) {
+      _handlingActivation = false;
+    }
+  }
+
+  Future<bool> _attemptAutoTransfer(String newSessionId) async {
+    final peers = await _waitForPeers(const Duration(seconds: 8));
+    if (peers.isEmpty) {
+      return false;
+    }
+
+    final apiClient = ref.read(apiClientProvider);
+    final transferService = SessionTransferService(apiClient);
+    final localSession = await transferService.getLocalActiveSession();
+    final deviceId = localSession?["device_id"]?.toString();
+    if (deviceId == null || deviceId.isEmpty) {
+      return false;
+    }
+
+    final entries = await transferService.fetchRemoteSessions(peers);
+    final match = entries.where((e) {
+      final remoteDeviceId = e.session["device_id"]?.toString();
+      return remoteDeviceId == deviceId;
+    }).toList();
+    if (match.isEmpty) {
+      return false;
+    }
+
+    final entry = match.first;
+    String status = "Starting transfer...";
+    StateSetter? setDialogState;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            setDialogState = setStateDialog;
+            return AlertDialog(
+              title: const Text("Continuing Session"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(status, textAlign: TextAlign.center),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    try {
+      final transferredSessionId = await transferService.transferSession(
+        entry,
+        onStatus: (msg) {
+          status = msg;
+          if (setDialogState != null) {
+            setDialogState!(() {});
+          }
+        },
+      );
+
+      if (!mounted) return true;
+      Navigator.pop(context);
+
+      if (transferredSessionId != newSessionId) {
+        await apiClient.post("/session/end", body: {
+          "session_id": newSessionId,
+        });
+      }
+
+      ref.read(sessionProvider.notifier).setActiveSession(transferredSessionId);
+      return true;
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Auto-transfer failed, continuing here. ($e)"),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<List<Peer>> _waitForPeers(Duration timeout) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      final peers = ref.read(peersListProvider).asData?.value ?? const <Peer>[];
+      if (peers.isNotEmpty) {
+        return peers;
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    return const <Peer>[];
+  }
+
   @override
   Widget build(BuildContext context) {
     // LISTEN HERE — this is the correct place
@@ -158,24 +272,25 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
     // });
 
     ref.listen(sessionProvider, (prev, next) {
-    if (next == null) return;
+      if (next == null) return;
 
-    // Detect QR scan transition
-    if (prev != null &&
-        prev.qrStatus == "pending" &&
-        next.qrStatus == "active") {
-      _qrScannedThisRuntime = true; // 🔴 THIS IS THE KEY LINE
-    }
+      // Detect QR scan transition
+      if (prev != null &&
+          prev.qrStatus == "pending" &&
+          next.qrStatus == "active") {
+        _qrScannedThisRuntime = true;
+      }
 
-    if (next.qrStatus == "active" && _qrScannedThisRuntime) {
-      Navigator.pushReplacementNamed(context, "/menu");
-    }
-  });
+      if (next.qrStatus == "active" && _qrScannedThisRuntime) {
+        Future.microtask(() => _handleActivatedSession(next.id));
+      }
+    });
 
 
     final session = ref.watch(sessionProvider);
     final sessionError = ref.watch(sessionErrorProvider);
     final debugText = _discoveryDebug ?? BaseUrlService.lastDatagramDebug();
+    ref.watch(peersListProvider);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -216,6 +331,14 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
                     onPressed: _startSessionWithDiscovery,
                     child: const Text(
                       "Retry",
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pushNamed(context, "/continue_session"),
+                    child: const Text(
+                      "Continue Existing Session",
                       style: TextStyle(color: Colors.white70),
                     ),
                   ),
@@ -279,6 +402,14 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
                     child: const Text(
                       "Display Debug",
                       style: TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pushNamed(context, "/continue_session"),
+                    child: const Text(
+                      "Continue Existing Session",
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
                   if (debugText != null) ...[
