@@ -13,6 +13,8 @@ class BaseUrlService {
       String.fromEnvironment('MIRROR_ID', defaultValue: '');
   static const String _expectedHostname =
       String.fromEnvironment('HOSTNAME', defaultValue: '');
+  static const bool _allowRemoteFallback =
+      bool.fromEnvironment('ALLOW_REMOTE_BACKEND', defaultValue: false);
 
   static String? _lastDatagramDebug;
 
@@ -53,6 +55,8 @@ class BaseUrlService {
     final completer = Completer<String?>();
     Timer? timer;
     Timer? announceTimer;
+    final localIps = await _getLocalIps();
+    String? fallback;
 
     try {
       final boundSocket = await RawDatagramSocket.bind(
@@ -77,16 +81,26 @@ class BaseUrlService {
               "from=${datagram.address.address}:${datagram.port}\n$payload";
           final map = json.decode(payload);
           if (map is! Map<String, dynamic>) return;
-          if (!_matchesExpectedMirror(map)) return;
           final resolved = _resolveBroadcastUrl(map, datagram.address.address);
-          if (resolved != null && !completer.isCompleted) {
-            completer.complete(resolved);
+          if (resolved == null) return;
+          final payloadIp = _resolveIp(map["ip"], datagram.address.address);
+          final matchesExpected = _matchesExpectedMirror(map);
+          final isLocal =
+              payloadIp != null && localIps.contains(payloadIp);
+          if (isLocal || matchesExpected) {
+            if (!completer.isCompleted) {
+              completer.complete(resolved);
+            }
+            return;
+          }
+          if (_allowRemoteFallback) {
+            fallback ??= resolved;
           }
         } catch (_) {}
       });
       timer = Timer(timeout, () {
         if (!completer.isCompleted) {
-          completer.complete(null);
+          completer.complete(fallback);
         }
       });
       final result = await completer.future;
@@ -98,6 +112,16 @@ class BaseUrlService {
       announceTimer?.cancel();
       socket?.close();
     }
+  }
+
+  static String? _resolveIp(dynamic rawIp, String fallback) {
+    if (rawIp is String && _isValidIp(rawIp)) {
+      return rawIp;
+    }
+    if (_isValidIp(fallback)) {
+      return fallback;
+    }
+    return null;
   }
 
   static void _sendDiscover(RawDatagramSocket socket) {
@@ -113,7 +137,7 @@ class BaseUrlService {
 
   static bool _matchesExpectedMirror(Map<String, dynamic> map) {
     if (_expectedMirrorId.isEmpty && _expectedHostname.isEmpty) {
-      return true;
+      return false;
     }
     final mirrorId = map["mirror_id"];
     if (_expectedMirrorId.isNotEmpty && mirrorId == _expectedMirrorId) {
@@ -159,6 +183,23 @@ class BaseUrlService {
       return value;
     }
     return "$value/api";
+  }
+
+  static Future<Set<String>> _getLocalIps() async {
+    final results = <String>{};
+    try {
+      final ifaces = await NetworkInterface.list();
+      for (final iface in ifaces) {
+        for (final addr in iface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 &&
+              !addr.isLoopback &&
+              !addr.address.startsWith('169.254')) {
+            results.add(addr.address);
+          }
+        }
+      }
+    } catch (_) {}
+    return results;
   }
 
   static bool _isValidIp(String value) {
