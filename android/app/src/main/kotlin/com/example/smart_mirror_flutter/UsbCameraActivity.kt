@@ -39,6 +39,7 @@ class UsbCameraActivity : Activity() {
     }
 
     private lateinit var textureView: TextureView
+    private lateinit var previewLayout: AspectRatioFrameLayout
     private lateinit var recordButton: ImageButton
     private lateinit var backButton: ImageButton
     private lateinit var timerText: TextView
@@ -62,6 +63,7 @@ class UsbCameraActivity : Activity() {
     private var countdownValue = 0
     private var recordingStartMs: Long? = null
     private var resultSent = false
+    private var previewSizeSet = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,11 +79,23 @@ class UsbCameraActivity : Activity() {
 
         val root = FrameLayout(this)
         textureView = TextureView(this)
-        textureView.layoutParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
+        previewLayout = AspectRatioFrameLayout(this).apply {
+            addView(
+                textureView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        root.addView(
+            previewLayout,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
         )
-        root.addView(textureView)
 
         recordButton = ImageButton(this).apply {
             setImageResource(android.R.drawable.presence_video_online)
@@ -214,6 +228,10 @@ class UsbCameraActivity : Activity() {
         val size = previewSize
         if (size != null) {
             surfaceTexture.setDefaultBufferSize(size.width, size.height)
+            runOnUiThread {
+                previewLayout.setAspectRatio(size.width.toFloat() / size.height.toFloat())
+                previewLayout.requestLayout()
+            }
         }
 
         manager.openCamera(cameraId!!, object : CameraDevice.StateCallback() {
@@ -299,6 +317,15 @@ class UsbCameraActivity : Activity() {
                 uiHandler.post { finishWithError("preview_config_failed") }
             }
         }, backgroundHandler)
+
+        if (!previewSizeSet && previewSize != null) {
+            previewSizeSet = true
+            val size = previewSize!!
+            runOnUiThread {
+                previewLayout.setAspectRatio(size.width.toFloat() / size.height.toFloat())
+                previewLayout.requestLayout()
+            }
+        }
     }
 
     private fun toggleRecording() {

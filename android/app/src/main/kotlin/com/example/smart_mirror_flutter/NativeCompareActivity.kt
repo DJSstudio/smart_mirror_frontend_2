@@ -16,6 +16,7 @@ import android.widget.TextView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.video.VideoSize
 import java.io.File
 import kotlin.math.abs
 
@@ -29,6 +30,8 @@ class NativeCompareActivity : Activity() {
     private lateinit var rightPlayer: ExoPlayer
     private lateinit var leftView: TextureView
     private lateinit var rightView: TextureView
+    private lateinit var leftAspect: AspectRatioFrameLayout
+    private lateinit var rightAspect: AspectRatioFrameLayout
     private lateinit var playPause: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeText: TextView
@@ -65,8 +68,50 @@ class NativeCompareActivity : Activity() {
         }
         leftView = TextureView(this)
         rightView = TextureView(this)
-        row.addView(leftView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
-        row.addView(rightView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        leftAspect = AspectRatioFrameLayout(this).apply {
+            addView(
+                leftView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        rightAspect = AspectRatioFrameLayout(this).apply {
+            addView(
+                rightView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        val leftCell = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(
+                leftAspect,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
+        }
+        val rightCell = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(
+                rightAspect,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
+        }
+
+        row.addView(leftCell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        row.addView(rightCell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
 
         val videoParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -170,6 +215,22 @@ class NativeCompareActivity : Activity() {
         }
         leftPlayer.addListener(listener)
         rightPlayer.addListener(listener)
+        leftPlayer.addListener(object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.height == 0) return
+                val ratio = (videoSize.width.toFloat() / videoSize.height.toFloat()) *
+                    videoSize.pixelWidthHeightRatio
+                leftAspect.setAspectRatio(ratio)
+            }
+        })
+        rightPlayer.addListener(object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.height == 0) return
+                val ratio = (videoSize.width.toFloat() / videoSize.height.toFloat()) *
+                    videoSize.pixelWidthHeightRatio
+                rightAspect.setAspectRatio(ratio)
+            }
+        })
     }
 
     override fun onStart() {
@@ -230,9 +291,14 @@ class NativeCompareActivity : Activity() {
 
         if (desiredPlaying) {
             if (master.playbackState == Player.STATE_ENDED) {
-                desiredPlaying = false
-                master.pause()
-                shortPlayer.pause()
+                master.seekTo(0)
+                if (shortDuration > 0) {
+                    shortPlayer.seekTo(0)
+                }
+                master.play()
+                if (shortDuration > 0) {
+                    shortPlayer.play()
+                }
                 return
             }
 

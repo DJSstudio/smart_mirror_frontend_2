@@ -17,6 +17,7 @@ import android.widget.TextView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.video.VideoSize
 import java.io.File
 
 class NativeVideoPlayerActivity : Activity() {
@@ -26,6 +27,7 @@ class NativeVideoPlayerActivity : Activity() {
 
     private lateinit var player: ExoPlayer
     private lateinit var textureView: TextureView
+    private lateinit var aspectLayout: AspectRatioFrameLayout
     private lateinit var playPause: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeText: TextView
@@ -52,11 +54,20 @@ class NativeVideoPlayerActivity : Activity() {
         root.setBackgroundColor(Color.BLACK)
 
         textureView = TextureView(this)
-        root.addView(
+        aspectLayout = AspectRatioFrameLayout(this)
+        aspectLayout.addView(
             textureView,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        root.addView(
+            aspectLayout,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             )
         )
 
@@ -144,6 +155,13 @@ class NativeVideoPlayerActivity : Activity() {
                     if (isPlaying) android.R.drawable.ic_media_pause
                     else android.R.drawable.ic_media_play
                 )
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.height == 0) return
+                val ratio = (videoSize.width.toFloat() / videoSize.height.toFloat()) *
+                    videoSize.pixelWidthHeightRatio
+                aspectLayout.setAspectRatio(ratio)
             }
         })
     }
