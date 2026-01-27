@@ -151,201 +151,192 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
       );
     }
     
-    final aspect = leftCtrl.value.aspectRatio;
     final showPlaying = _desiredPlaying;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(title: const Text("Compare Videos")),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Video players side by side
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: AspectRatio(
-                      aspectRatio: aspect,
-                      child: Stack(
-                        children: [
-                          VideoPlayer(leftCtrl),
-                          Positioned(
-                            top: 8,
-                            left: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.6),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                "Video 1",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxWidth = constraints.maxWidth;
+            final maxHeight = constraints.maxHeight;
+            final controlsHeight = maxHeight > 700 ? 180.0 : 140.0;
+            final topBarHeight = 48.0;
+            final videoAreaHeight =
+                maxHeight - controlsHeight - topBarHeight;
+            return Column(
+              children: [
+                SizedBox(
+                  height: topBarHeight,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon:
+                          const Icon(Icons.arrow_back, color: Colors.white),
                     ),
                   ),
-                  Expanded(
-                    child: AspectRatio(
-                      aspectRatio: aspect,
-                      child: Stack(
-                        children: [
-                          VideoPlayer(rightCtrl),
-                          Positioned(
-                            top: 8,
-                            left: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.6),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                "Video 2",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Progress bar
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: ValueListenableBuilder<VideoPlayerValue>(
-                valueListenable: leftCtrl,
-                builder: (context, value, child) {
-                  return Column(
+                ),
+                SizedBox(
+                  height: videoAreaHeight,
+                  child: Row(
                     children: [
-                      SliderTheme(
-                        data: SliderThemeData(
-                          trackHeight: 4,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 8,
-                          ),
-                        ),
-                        child: Slider(
-                          activeColor: Colors.white70,
-                          inactiveColor: Colors.white24,
-                          value: value.position.inSeconds.toDouble(),
-                          max: value.duration.inSeconds.toDouble(),
-                          onChanged: (double seconds) {
-                            _seekAll(
-                              Duration(seconds: seconds.toInt()),
-                            );
-                          },
+                      Expanded(
+                        child: _buildVideoPane(
+                          leftCtrl,
+                          "Video 1",
+                          maxWidth / 2,
+                          videoAreaHeight,
                         ),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              _formatDuration(value.position),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                            Text(
-                              _formatDuration(value.duration),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
+                      Expanded(
+                        child: _buildVideoPane(
+                          rightCtrl,
+                          "Video 2",
+                          maxWidth / 2,
+                          videoAreaHeight,
                         ),
                       ),
                     ],
-                  );
-                },
-              ),
-            ),
-            // Controls
-            Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: Colors.white12),
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.replay_10),
-                      color: Colors.white70,
-                      onPressed: () {
-                        final newPos = leftCtrl.value.position -
-                            const Duration(seconds: 10);
-                        _seekAll(
-                          newPos >= Duration.zero
-                              ? newPos
-                              : Duration.zero,
-                        );
-                      },
-                    ),
-                    Container(
-                      decoration: const BoxDecoration(
-                        color: Colors.white12,
-                        shape: BoxShape.circle,
-                      ),
-                      child: IconButton(
-                        iconSize: 36,
-                        color: Colors.white,
-                        onPressed: () => _setDesiredPlaying(!showPlaying),
-                        icon: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 180),
-                          transitionBuilder: (child, anim) =>
-                              ScaleTransition(scale: anim, child: child),
-                          child: Icon(
-                            showPlaying ? Icons.pause : Icons.play_arrow,
-                            key: ValueKey(showPlaying),
+                SizedBox(
+                  height: controlsHeight,
+                  child: Container(
+                    color: Colors.black.withOpacity(0.65),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ValueListenableBuilder<VideoPlayerValue>(
+                          valueListenable: leftCtrl,
+                          builder: (context, value, child) {
+                            final maxSeconds =
+                                value.duration.inSeconds.toDouble();
+                            final safeMax =
+                                maxSeconds > 0 ? maxSeconds : 1.0;
+                            return Column(
+                              children: [
+                                SliderTheme(
+                                  data: SliderThemeData(
+                                    trackHeight: 4,
+                                    thumbShape:
+                                        const RoundSliderThumbShape(
+                                      enabledThumbRadius: 8,
+                                    ),
+                                  ),
+                                  child: Slider(
+                                    activeColor: Colors.white70,
+                                    inactiveColor: Colors.white24,
+                                    value: value.position.inSeconds
+                                        .toDouble()
+                                        .clamp(0, safeMax),
+                                    max: safeMax,
+                                    onChanged: (double seconds) {
+                                      _seekAll(
+                                        Duration(seconds: seconds.toInt()),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      _formatDuration(value.position),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      _formatDuration(value.duration),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.replay_10),
+                                color: Colors.white70,
+                                onPressed: () {
+                                  final newPos = leftCtrl.value.position -
+                                      const Duration(seconds: 10);
+                                  _seekAll(
+                                    newPos >= Duration.zero
+                                        ? newPos
+                                        : Duration.zero,
+                                  );
+                                },
+                              ),
+                              Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.white12,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: IconButton(
+                                  iconSize: 36,
+                                  color: Colors.white,
+                                  onPressed: () =>
+                                      _setDesiredPlaying(!showPlaying),
+                                  icon: AnimatedSwitcher(
+                                    duration:
+                                        const Duration(milliseconds: 180),
+                                    transitionBuilder: (child, anim) =>
+                                        ScaleTransition(
+                                      scale: anim,
+                                      child: child,
+                                    ),
+                                    child: Icon(
+                                      showPlaying
+                                          ? Icons.pause
+                                          : Icons.play_arrow,
+                                      key: ValueKey(showPlaying),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.forward_10),
+                                color: Colors.white70,
+                                onPressed: () {
+                                  final newPos = leftCtrl.value.position +
+                                      const Duration(seconds: 10);
+                                  final max = leftCtrl.value.duration;
+                                  _seekAll(newPos <= max ? newPos : max);
+                                },
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.forward_10),
-                      color: Colors.white70,
-                      onPressed: () {
-                        final newPos = leftCtrl.value.position +
-                            const Duration(seconds: 10);
-                        final max = leftCtrl.value.duration;
-                        _seekAll(newPos <= max ? newPos : max);
-                      },
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
@@ -358,5 +349,61 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
     String twoDigitSeconds =
         twoDigits(duration.inSeconds.remainder(60));
     return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
+  }
+
+  Widget _buildVideoPane(
+    VideoPlayerController controller,
+    String label,
+    double maxWidth,
+    double maxHeight,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final aspect = controller.value.aspectRatio;
+        var width = maxWidth;
+        var height = width / aspect;
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = height * aspect;
+        }
+        return Center(
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: ClipRect(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: VideoPlayer(controller),
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

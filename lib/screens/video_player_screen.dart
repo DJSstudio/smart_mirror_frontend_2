@@ -48,104 +48,151 @@ class _MirrorVideoPlayerScreenState extends State<MirrorVideoPlayerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(title: const Text("Video Player")),
       body: SafeArea(
         child: _ready
-            ? SingleChildScrollView(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+            ? LayoutBuilder(
+                builder: (context, constraints) {
+                  final maxWidth = constraints.maxWidth;
+                  final maxHeight = constraints.maxHeight;
+                  final controlsHeight = maxHeight > 700 ? 180.0 : 140.0;
+                  final topBarHeight = 48.0;
+                  final videoAreaHeight =
+                      maxHeight - controlsHeight - topBarHeight;
+                  final aspect = _controller.value.aspectRatio;
+                  var width = maxWidth;
+                  var height = width / aspect;
+                  if (height > videoAreaHeight) {
+                    height = videoAreaHeight;
+                    width = height * aspect;
+                  }
+                  return Column(
                     children: [
-                      AspectRatio(
-                        aspectRatio: _controller.value.aspectRatio,
-                        child: Stack(
-                          children: [
-                            VideoPlayer(_controller),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: Container(
-                                color: Colors.black.withOpacity(0.5),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                child: Text(
-                                  _formatDuration(
-                                      _controller.value.duration),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
+                      SizedBox(
+                        height: topBarHeight,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        height: videoAreaHeight,
+                        child: Center(
+                          child: SizedBox(
+                            width: width,
+                            height: height,
+                            child: ClipRect(
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: VideoPlayer(_controller),
                                   ),
-                                ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: Container(
+                                      color: Colors.black.withOpacity(0.5),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      child: Text(
+                                        _formatDuration(
+                                          _controller.value.duration,
+                                        ),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: ValueListenableBuilder<VideoPlayerValue>(
-                          valueListenable: _controller,
-                          builder: (context, value, child) {
-                            return Column(
-                              children: [
-                                Text(
-                                  "${_formatDuration(value.position)} / ${_formatDuration(value.duration)}",
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
+                      SizedBox(
+                        height: controlsHeight,
+                        child: Container(
+                          padding:
+                              const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                          color: Colors.black.withOpacity(0.55),
+                          child: ValueListenableBuilder<VideoPlayerValue>(
+                            valueListenable: _controller,
+                            builder: (context, value, child) {
+                              final maxSeconds =
+                                  value.duration.inSeconds.toDouble();
+                              final safeMax = maxSeconds > 0 ? maxSeconds : 1.0;
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    children: [
+                                      IconButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            value.isPlaying
+                                                ? _controller.pause()
+                                                : _controller.play();
+                                          });
+                                        },
+                                        icon: Icon(
+                                          value.isPlaying
+                                              ? Icons.pause
+                                              : Icons.play_arrow,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        "${_formatDuration(value.position)} / ${_formatDuration(value.duration)}",
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                SliderTheme(
-                                  data: SliderThemeData(
-                                    trackHeight: 4,
-                                    thumbShape: const RoundSliderThumbShape(
-                                        enabledThumbRadius: 8),
+                                  SliderTheme(
+                                    data: SliderThemeData(
+                                      trackHeight: 4,
+                                      thumbShape:
+                                          const RoundSliderThumbShape(
+                                        enabledThumbRadius: 8,
+                                      ),
+                                    ),
+                                    child: Slider(
+                                      activeColor: Colors.blue,
+                                      inactiveColor: Colors.grey.shade700,
+                                      value: value.position.inSeconds
+                                          .toDouble()
+                                          .clamp(0, safeMax),
+                                      max: safeMax,
+                                      onChanged: (double seconds) {
+                                        _controller.seekTo(
+                                          Duration(seconds: seconds.toInt()),
+                                        );
+                                      },
+                                    ),
                                   ),
-                                  child: Slider(
-                                    activeColor: Colors.blue,
-                                    inactiveColor: Colors.grey.shade700,
-                                    value:
-                                        value.position.inSeconds.toDouble(),
-                                    max: value.duration.inSeconds
-                                        .toDouble(),
-                                    onChanged: (double seconds) {
-                                      _controller.seekTo(
-                                        Duration(seconds: seconds.toInt()),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+                                ],
+                              );
+                            },
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 16),
                     ],
-                  ),
-                ),
+                  );
+                },
               )
             : const Center(child: CircularProgressIndicator()),
       ),
-      floatingActionButton: _ready
-          ? FloatingActionButton(
-              backgroundColor: Colors.white,
-              onPressed: () {
-                setState(() {
-                  _controller.value.isPlaying
-                      ? _controller.pause()
-                      : _controller.play();
-                });
-              },
-              child: Icon(
-                _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                color: Colors.black,
-              ),
-            )
-          : null,
     );
   }
 }

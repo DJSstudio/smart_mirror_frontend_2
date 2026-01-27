@@ -42,6 +42,10 @@ class RecordingNotifier extends StateNotifier<RecordingState> {
     // refresh gallery
     ref.read(galleryProvider.notifier).loadVideos(sessionId);
   }
+
+  void reset() {
+    state = RecordingState.idle;
+  }
 }
 
 final recordingProvider =

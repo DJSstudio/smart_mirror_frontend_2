@@ -8,6 +8,7 @@ import '../utils/error_logger.dart';
 import '../api/client_provider.dart';
 import '../services/base_url_service.dart';
 import '../services/session_transfer_service.dart';
+import '../services/record_resume_service.dart';
 import '../state/peers_state.dart';
 import '../peers/peer_model.dart';
 
@@ -123,6 +124,14 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
     Future.microtask(() async {
       if (_started) return;
       _started = true;
+      final pendingSession =
+          await RecordResumeService.consumePending();
+      if (pendingSession != null && pendingSession.isNotEmpty) {
+        ref.read(sessionProvider.notifier).setActiveSession(pendingSession);
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, "/record");
+        return;
+      }
       await _startSessionWithDiscovery();
     });
   }

@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/gallery_provider.dart';
 import 'video_player_screen.dart';
+import '../native/native_agent.dart';
+import '../utils/env.dart';
 import 'compare_screen.dart';
 
 class GalleryScreen extends ConsumerStatefulWidget {
@@ -185,14 +188,20 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                                       icon: const Icon(Icons.play_arrow),
                                       label: const Text("Play"),
                                       onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) =>
-                                                MirrorVideoPlayerScreen(
-                                                    videoUrl: v.url),
-                                          ),
-                                        );
+                                        final resolvedUrl =
+                                            _resolveVideoUrl(v.url);
+                                        if (Platform.isAndroid) {
+                                          NativeAgent.openNativePlayer(resolvedUrl);
+                                        } else {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  MirrorVideoPlayerScreen(
+                                                      videoUrl: resolvedUrl),
+                                            ),
+                                          );
+                                        }
                                       },
                                     ),
                                   ),
@@ -236,15 +245,21 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                           .toList();
                       
                       if (selectedVideos.length == 2) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => CompareScreen(
-                              leftPath: selectedVideos[0].url,
-                              rightPath: selectedVideos[1].url,
+                        final left = _resolveVideoUrl(selectedVideos[0].url);
+                        final right = _resolveVideoUrl(selectedVideos[1].url);
+                        if (Platform.isAndroid) {
+                          NativeAgent.openNativeCompare(left, right);
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CompareScreen(
+                                leftPath: left,
+                                rightPath: right,
+                              ),
                             ),
-                          ),
-                        );
+                          );
+                        }
                       }
                     },
                   ),
@@ -268,5 +283,19 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
         ),
       ),
     );
+  }
+
+  String _resolveVideoUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed;
+    }
+    final base = Env.baseUrl;
+    if (base.isEmpty) return trimmed;
+    final root = base.replaceAll(RegExp(r"/api/?$"), "");
+    if (trimmed.startsWith("/")) {
+      return "$root$trimmed";
+    }
+    return "$root/$trimmed";
   }
 }

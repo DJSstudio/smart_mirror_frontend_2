@@ -1,16 +1,20 @@
 package com.example.smart_mirror_flutter
 
 import android.content.Context
+import android.content.Intent
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.hardware.display.DisplayManager
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.view.Display
-import android.hardware.display.DisplayManager
-import java.io.PrintWriter
-import java.io.StringWriter
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : FlutterActivity() {
 
@@ -21,10 +25,18 @@ class MainActivity : FlutterActivity() {
     private val CRASH_KEY = "last_crash"
     private val MIRROR_STATUS_PREFS = "mirror_status"
     private val MIRROR_STATUS_KEY = "last_status"
+    private val USB_CAPTURE_PREFS = "usb_capture_status"
+    private val USB_CAPTURE_STATUS = "status"
+    private val USB_CAPTURE_ERROR = "error"
+    private val USB_CAPTURE_PATH = "path"
+    private val USB_CAPTURE_TIME = "time_ms"
 
     private lateinit var nativeAgent: NativeAgent
     private lateinit var mirrorDisplayManager: MirrorDisplayManager
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var pendingVideoResult: MethodChannel.Result? = null
+    private var pendingVideoPath: String? = null
+    private val usbCaptureRequestCode = 9021
 
     // 🔑 Holds QR token when app is opened via QR deep link
     private var initialToken: String? = null
@@ -194,9 +206,57 @@ class MainActivity : FlutterActivity() {
                         .apply()
                     result.success(true)
                 }
+                "getLastUsbCaptureStatus" -> {
+                    val prefs = getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
+                    val status = prefs.getString(USB_CAPTURE_STATUS, null)
+                    val error = prefs.getString(USB_CAPTURE_ERROR, null)
+                    val path = prefs.getString(USB_CAPTURE_PATH, null)
+                    val timeMs = prefs.getLong(USB_CAPTURE_TIME, 0L)
+                    result.success(
+                        mapOf(
+                            "status" to status,
+                            "error" to error,
+                            "path" to path,
+                            "time_ms" to timeMs
+                        )
+                    )
+                }
+                "clearLastUsbCaptureStatus" -> {
+                    getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
+                        .edit()
+                        .clear()
+                        .apply()
+                    result.success(true)
+                }
                 "getLastRecorded" -> {
                     val path = nativeAgent.getLastRecordedPath()
                     result.success(path)
+                }
+                "captureUsbVideo" -> {
+                    val autoStart = call.argument<Boolean>("auto_start") ?: true
+                    launchUsbVideoCapture(result, autoStart)
+                }
+                "hasExternalCamera" -> {
+                    result.success(hasExternalCamera())
+                }
+                "openNativePlayer" -> {
+                    val source = call.argument<String>("source")
+                    if (source.isNullOrBlank()) {
+                        result.error("missing_source", "source required", null)
+                    } else {
+                        openNativePlayer(source)
+                        result.success(true)
+                    }
+                }
+                "openNativeCompare" -> {
+                    val left = call.argument<String>("left")
+                    val right = call.argument<String>("right")
+                    if (left.isNullOrBlank() || right.isNullOrBlank()) {
+                        result.error("missing_sources", "left/right required", null)
+                    } else {
+                        openNativeCompare(left, right)
+                        result.success(true)
+                    }
                 }
                 else -> result.notImplemented()
             }
@@ -216,4 +276,100 @@ class MainActivity : FlutterActivity() {
             }
         })
     }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != usbCaptureRequestCode) return
+        val response = pendingVideoResult ?: return
+        val path = pendingVideoPath
+        if (path != null) {
+            val file = File(path)
+            if (resultCode == RESULT_OK && file.exists() && file.length() > 0L) {
+                setUsbCaptureStatus("ok", path, null)
+                response.success(path)
+            } else {
+                val error = data?.getStringExtra(UsbCameraActivity.EXTRA_ERROR)
+                if (!error.isNullOrBlank()) {
+                    setUsbCaptureStatus("failed", path, error)
+                    response.error("capture_failed", error, null)
+                } else {
+                    setUsbCaptureStatus("canceled", path, null)
+                    response.success(null)
+                }
+            }
+        } else {
+            setUsbCaptureStatus("canceled", null, "missing_path")
+            response.success(null)
+        }
+        pendingVideoResult = null
+        pendingVideoPath = null
+    }
+
+    private fun launchUsbVideoCapture(result: MethodChannel.Result, autoStart: Boolean) {
+        if (pendingVideoResult != null) {
+            result.error("capture_busy", "Capture already in progress", null)
+            return
+        }
+        val dir = getExternalFilesDir("videos") ?: filesDir
+        val file = File(dir, "usb_${System.currentTimeMillis()}.mp4")
+        val intent = Intent(this, UsbCameraActivity::class.java).apply {
+            putExtra(UsbCameraActivity.EXTRA_OUTPUT_PATH, file.absolutePath)
+            putExtra(UsbCameraActivity.EXTRA_AUTO_START, autoStart)
+        }
+        pendingVideoResult = result
+        pendingVideoPath = file.absolutePath
+        setUsbCaptureStatus("started", file.absolutePath, null)
+        try {
+            startActivityForResult(intent, usbCaptureRequestCode)
+        } catch (e: Exception) {
+            setUsbCaptureStatus("launch_failed", file.absolutePath, e.message)
+            pendingVideoResult = null
+            pendingVideoPath = null
+            result.error("capture_error", e.message, null)
+        }
+    }
+
+    private fun setUsbCaptureStatus(status: String, path: String?, error: String?) {
+        getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(USB_CAPTURE_STATUS, status)
+            .putString(USB_CAPTURE_PATH, path)
+            .putString(USB_CAPTURE_ERROR, error)
+            .putLong(USB_CAPTURE_TIME, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun hasExternalCamera(): Boolean {
+        return try {
+            val manager = getSystemService(CAMERA_SERVICE) as CameraManager
+            for (id in manager.cameraIdList) {
+                val chars = manager.getCameraCharacteristics(id)
+                val facing = chars.get(CameraCharacteristics.LENS_FACING)
+                if (facing == CameraCharacteristics.LENS_FACING_EXTERNAL) {
+                    return true
+                }
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun openNativePlayer(source: String) {
+        val intent = Intent(this, NativeVideoPlayerActivity::class.java).apply {
+            putExtra(NativeVideoPlayerActivity.EXTRA_SOURCE, source)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    private fun openNativeCompare(left: String, right: String) {
+        val intent = Intent(this, NativeCompareActivity::class.java).apply {
+            putExtra(NativeCompareActivity.EXTRA_LEFT, left)
+            putExtra(NativeCompareActivity.EXTRA_RIGHT, right)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
 }

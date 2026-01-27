@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
 import 'screens/qr_display_screen.dart';
-import 'screens/recording_screen.dart';
+import 'screens/camera_record_screen.dart';
 import 'screens/gallery_screen.dart';
 import 'screens/mirror_list_screen.dart';
 import 'screens/main_menu_screen.dart';
@@ -54,7 +54,7 @@ class SmartMirrorApp extends StatelessWidget {
         '/continue_session': (c) => const ContinueSessionScreen(),
         "/menu": (ctx) => const ActiveSessionScreen(),
         "/login": (context) => const QRDisplayScreen(),
-        "/record": (c) => const RecordingScreen(),
+        "/record": (c) => const CameraRecordScreen(),
         "/hdmi_debug": (_) => const HdmiDebugScreen(),
         "/gallery": (context) {
           final args = ModalRoute.of(context)!.settings.arguments as Map;

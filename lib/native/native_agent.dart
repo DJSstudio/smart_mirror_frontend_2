@@ -93,6 +93,24 @@ class NativeAgent {
     }
   }
 
+  static Future<String?> captureUsbVideo({bool autoStart = true}) async {
+    final path = await _channel.invokeMethod<String>(
+      'captureUsbVideo',
+      {'auto_start': autoStart},
+    );
+    return path;
+  }
+
+  static Future<bool> hasExternalCamera() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('hasExternalCamera');
+      return res ?? false;
+    } catch (e) {
+      print('hasExternalCamera error: $e');
+      return false;
+    }
+  }
+
   static Future<String?> getLastCrash() async {
     try {
       final res = await _channel.invokeMethod<dynamic>('getLastCrash');
@@ -135,6 +153,27 @@ class NativeAgent {
     }
   }
 
+  static Future<Map<String, dynamic>> getLastUsbCaptureStatus() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getLastUsbCaptureStatus');
+      if (res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+      return {};
+    } catch (e) {
+      print('getLastUsbCaptureStatus error: $e');
+      return {};
+    }
+  }
+
+  static Future<void> clearLastUsbCaptureStatus() async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearLastUsbCaptureStatus');
+    } catch (e) {
+      print('clearLastUsbCaptureStatus error: $e');
+    }
+  }
+
   static Future<String?> getLastRecorded() async {
     try {
       final path = await _channel.invokeMethod<String>('getLastRecorded');
@@ -153,5 +192,27 @@ class NativeAgent {
       return <String, dynamic>{'event': event.toString()};
     });
     return _eventStream!;
+  }
+
+  static Future<void> openNativePlayer(String source) async {
+    try {
+      await _channel.invokeMethod<dynamic>(
+        'openNativePlayer',
+        {'source': source},
+      );
+    } catch (e) {
+      print('openNativePlayer error: $e');
+    }
+  }
+
+  static Future<void> openNativeCompare(String left, String right) async {
+    try {
+      await _channel.invokeMethod<dynamic>(
+        'openNativeCompare',
+        {'left': left, 'right': right},
+      );
+    } catch (e) {
+      print('openNativeCompare error: $e');
+    }
   }
 }
