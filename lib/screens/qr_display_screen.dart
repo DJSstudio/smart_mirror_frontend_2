@@ -182,15 +182,17 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
     final apiClient = ref.read(apiClientProvider);
     final transferService = SessionTransferService(apiClient);
     final localSession = await transferService.getLocalActiveSession();
-    final deviceId = localSession?["device_id"]?.toString();
-    if (deviceId == null || deviceId.isEmpty) {
+    final userId = localSession?["user_id"]?.toString() ??
+        localSession?["device_id"]?.toString();
+    if (userId == null || userId.isEmpty) {
       return false;
     }
 
     final entries = await transferService.fetchRemoteSessions(peers);
     final match = entries.where((e) {
-      final remoteDeviceId = e.session["device_id"]?.toString();
-      return remoteDeviceId == deviceId;
+      final remoteUserId = e.session["user_id"]?.toString() ??
+          e.session["device_id"]?.toString();
+      return remoteUserId == userId;
     }).toList();
     if (match.isEmpty) {
       return false;

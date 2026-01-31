@@ -179,8 +179,10 @@ class SessionTransferService {
 
   Map<String, dynamic> _filterSessionMeta(Map<String, dynamic> session) {
     final deviceId = session["device_id"];
+    final userId = session["user_id"];
     return {
       if (deviceId != null) "device_id": deviceId,
+      if (userId != null) "user_id": userId,
     };
   }
 
