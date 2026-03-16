@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../state/session_provider.dart';
 import '../native/native_agent.dart';
 import '../utils/error_logger.dart';
@@ -9,6 +10,7 @@ import '../api/client_provider.dart';
 import '../services/base_url_service.dart';
 import '../services/session_transfer_service.dart';
 import '../services/record_resume_service.dart';
+import '../services/display_selection_service.dart';
 import '../state/peers_state.dart';
 import '../peers/peer_model.dart';
 
@@ -29,44 +31,118 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
   String? _discoveryError;
   String? _discoveryDebug;
   bool _handlingActivation = false;
+  bool _selectingDisplay = false;
 
   Future<void> _showDisplayDebug() async {
     if (_debugOpen || !mounted) return;
     _debugOpen = true;
-    final info = await NativeAgent.getDisplayInfo();
-    if (!mounted) return;
-    final displays = (info["displays"] as List?) ?? [];
-    final currentId = info["currentDisplayId"];
-    final presentationIds = (info["presentationIds"] as List?) ?? [];
-    final lines = displays.map((d) {
-      final map = Map<String, dynamic>.from(d as Map);
-      final id = map["id"];
-      final name = map["name"];
-      final state = map["state"];
-      final flags = map["flags"];
-      final isPresentation = map["isPresentation"] == true ? " presentation" : "";
-      final isDefault = map["isDefault"] == true ? " default" : "";
-      return "id=$id$isDefault$isPresentation state=$state flags=$flags\n$name";
-    }).join("\n\n");
+    try {
+      final info = await NativeAgent.getDisplayInfo();
+      if (!mounted) return;
+      final displays = (info["displays"] as List?) ?? [];
+      final currentId = info["currentDisplayId"];
+      final presentationIds = (info["presentationIds"] as List?) ?? [];
+      final lines = displays.map((d) {
+        final map = Map<String, dynamic>.from(d as Map);
+        final id = map["id"];
+        final name = map["name"];
+        final state = map["state"];
+        final flags = map["flags"];
+        final isPresentation = map["isPresentation"] == true ? " presentation" : "";
+        final isDefault = map["isDefault"] == true ? " default" : "";
+        return "id=$id$isDefault$isPresentation state=$state flags=$flags\n$name";
+      }).join("\n\n");
 
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Display Debug"),
-        content: SingleChildScrollView(
-          child: Text(
-            "currentDisplayId=$currentId\npresentationIds=$presentationIds\n\n$lines",
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text("Display Debug"),
+          content: SingleChildScrollView(
+            child: Text(
+              "currentDisplayId=$currentId\npresentationIds=$presentationIds\n\n$lines",
+            ),
           ),
         ),
-      ),
-    );
-    _debugOpen = false;
+      );
+    } finally {
+      _debugOpen = false;
+    }
+  }
+
+  Future<void> _showMirrorDisplayPicker() async {
+    if (_selectingDisplay || !mounted) return;
+    _selectingDisplay = true;
+    try {
+      final info = await NativeAgent.getDisplayInfo();
+      final currentId = info["currentDisplayId"] as int?;
+      final preferred = await NativeAgent.getPreferredMirrorDisplay();
+      final displays = (info["displays"] as List?) ?? [];
+      if (!mounted) return;
+
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text("Choose Mirror Display"),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: displays.map((d) {
+                  final map = Map<String, dynamic>.from(d as Map);
+                  final id = map["id"] as int?;
+                  final w = map["width"] as int? ?? 0;
+                  final h = map["height"] as int? ?? 0;
+                  final isPresentation = map["isPresentation"] == true;
+                  final isCurrent = id == currentId;
+                  final isPreferred = id == preferred;
+                  final name = map["name"]?.toString() ?? "Display";
+                  final subtitle = "$name  ${w}x$h";
+
+                  return ListTile(
+                    dense: true,
+                    enabled: isPresentation && !isCurrent,
+                    title: Text("Display $id"),
+                    subtitle: Text(
+                      isCurrent
+                          ? "$subtitle (App screen)"
+                          : (isPresentation ? subtitle : "$subtitle (Not eligible)"),
+                    ),
+                    trailing: isPreferred
+                        ? const Icon(Icons.check_circle, color: Colors.green)
+                        : null,
+                    onTap: (!isPresentation || isCurrent || id == null)
+                        ? null
+                        : () async {
+                            await NativeAgent.setPreferredMirrorDisplay(id);
+                            if (!mounted) return;
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("Mirror display set to id=$id"),
+                              ),
+                            );
+                          },
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _selectingDisplay = false;
+    }
   }
 
   @override
   void initState() {
     super.initState();
     _qrScannedThisRuntime = false; // 🔴 ADD THIS
+    Future.microtask(() async {
+      await NativeAgent.showMirrorIdle();
+      await DisplaySelectionService.forceMirrorToLargestExternal();
+    });
     Future.microtask(() async {
       if (_crashShown) return;
       final crash = await NativeAgent.getLastCrash();
@@ -303,140 +379,199 @@ class _QRDisplayScreenState extends ConsumerState<QRDisplayScreen> {
     final debugText = _discoveryDebug ?? BaseUrlService.lastDatagramDebug();
     ref.watch(peersListProvider);
 
+    final titleStyle = GoogleFonts.playfairDisplay(
+      fontSize: 24,
+      fontWeight: FontWeight.w500,
+      color: const Color(0xFF6B6661),
+    );
+    final bodyStyle = GoogleFonts.workSans(
+      fontSize: 14,
+      color: const Color(0xFF8C8681),
+    );
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFFF2ECE7),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Center(
-            child: session == null
-            ? Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxWidth = constraints.maxWidth;
+            final cardWidth = (maxWidth * 0.9).clamp(360.0, 900.0);
+            return Center(
+              child: Column(
                 children: [
-                  const Text(
-                    "Preparing QR...",
-                    style: TextStyle(color: Colors.white, fontSize: 20),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_discoveryError != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        _discoveryError!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.redAccent),
-                      ),
-                    )
-                  else if (sessionError != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        sessionError,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.redAccent),
-                      ),
-                    )
-                  else
-                    const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: _startSessionWithDiscovery,
-                    child: const Text(
-                      "Retry",
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        Navigator.pushNamed(context, "/continue_session"),
-                    child: const Text(
-                      "Continue Existing Session",
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  if (debugText != null) ...[
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        "Discovery Debug:\n$debugText",
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                  TextButton(
-                    onPressed: _showDisplayDebug,
-                    child: const Text(
-                      "Display Debug",
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  ),
-                ],
-              )
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    "Scan to Start Session",
-                    style: TextStyle(fontSize: 24, color: Colors.white),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // --- QR CODE ---
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: QrImageView(
-                      data: session.qrUrl,
-                      size: 260,
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 6),
                   Text(
-                    session.qrStatus == "pending"
-                        ? "Waiting for your phone to scan..."
-                        : "Activated!",
-                    style: const TextStyle(fontSize: 18, color: Colors.white70),
+                    "Scan to Start Session",
+                    style: titleStyle,
                   ),
-
-                  const SizedBox(height: 20),
-                  if (session.qrStatus == "pending")
-                    const CircularProgressIndicator(),
-
-                  const SizedBox(height: 20),
-                  TextButton(
-                    onPressed: _showDisplayDebug,
-                    child: const Text(
-                      "Display Debug",
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        Navigator.pushNamed(context, "/continue_session"),
-                    child: const Text(
-                      "Continue Existing Session",
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  if (debugText != null) ...[
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        "Discovery Debug:\n$debugText",
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  TextButton.icon(
+                    onPressed: _showMirrorDisplayPicker,
+                    icon: const Icon(Icons.monitor, size: 16, color: Color(0xFF8C8681)),
+                    label: Text(
+                      "Mirror Screen",
+                      style: GoogleFonts.workSans(
+                        fontSize: 12,
+                        color: const Color(0xFF8C8681),
                       ),
                     ),
-                  ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Center(
+                      child: Container(
+                        width: cardWidth,
+                        margin: const EdgeInsets.all(20),
+                        padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 26),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7F2EE),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(color: Colors.white70),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 18,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: SingleChildScrollView(
+                          child: session == null
+                            ? Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text("Preparing QR...", style: titleStyle),
+                                  const SizedBox(height: 20),
+                                  if (_discoveryError != null)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                                      child: Text(
+                                        _discoveryError!,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(color: Colors.redAccent),
+                                      ),
+                                    )
+                                  else if (sessionError != null)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                                      child: Text(
+                                        sessionError,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(color: Colors.redAccent),
+                                      ),
+                                    )
+                                  else
+                                    const CircularProgressIndicator(
+                                      color: Color(0xFFB9B1AA),
+                                    ),
+                                  const SizedBox(height: 16),
+                                  TextButton(
+                                    onPressed: _startSessionWithDiscovery,
+                                    child: Text("Retry", style: bodyStyle),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pushNamed(context, "/continue_session"),
+                                    child: Text(
+                                      "Continue Existing Session",
+                                      style: bodyStyle,
+                                    ),
+                                  ),
+                                  if (debugText != null) ...[
+                                    const SizedBox(height: 8),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                                      child: Text(
+                                        "Discovery Debug:\n$debugText",
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.workSans(
+                                          fontSize: 11,
+                                          color: const Color(0xFF9D948E),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  TextButton(
+                                    onPressed: _showDisplayDebug,
+                                    child: Text(
+                                      "Display Debug",
+                                      style: GoogleFonts.workSans(
+                                        fontSize: 12,
+                                        color: const Color(0xFF9D948E),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                              : Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(20),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: QrImageView(
+                                      data: session.qrUrl,
+                                      size: 260,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    session.qrStatus == "pending"
+                                        ? "Waiting for your phone to scan..."
+                                        : "Activated!",
+                                    style: bodyStyle,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  if (session.qrStatus == "pending")
+                                    const CircularProgressIndicator(
+                                      color: Color(0xFFB9B1AA),
+                                    ),
+                                  const SizedBox(height: 20),
+                                  TextButton(
+                                    onPressed: _showDisplayDebug,
+                                    child: Text(
+                                      "Display Debug",
+                                      style: GoogleFonts.workSans(
+                                        fontSize: 12,
+                                        color: const Color(0xFF9D948E),
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pushNamed(context, "/continue_session"),
+                                    child: Text(
+                                      "Continue Existing Session",
+                                      style: bodyStyle,
+                                    ),
+                                  ),
+                                  if (debugText != null) ...[
+                                    const SizedBox(height: 8),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                                      child: Text(
+                                        "Discovery Debug:\n$debugText",
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.workSans(
+                                          fontSize: 11,
+                                          color: const Color(0xFF9D948E),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-          ),
+            );
+          },
         ),
       ),
     );

@@ -70,6 +70,16 @@ class NativeAgent {
     }
   }
 
+  static Future<bool> showMirrorRecording() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('showMirrorRecording');
+      return res ?? false;
+    } catch (e) {
+      print('showMirrorRecording error: $e');
+      return false;
+    }
+  }
+
   static Future<bool> hideMirror() async {
     try {
       final res = await _channel.invokeMethod<bool>('hideMirror');
@@ -174,6 +184,19 @@ class NativeAgent {
     }
   }
 
+  static Future<List<String>> getUsbCaptureLogs() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getUsbCaptureLogs');
+      if (res is List) {
+        return res.map((e) => e.toString()).toList();
+      }
+      return const [];
+    } catch (e) {
+      print('getUsbCaptureLogs error: $e');
+      return const [];
+    }
+  }
+
   static Future<String?> getLastRecorded() async {
     try {
       final path = await _channel.invokeMethod<String>('getLastRecorded');
@@ -213,6 +236,60 @@ class NativeAgent {
       );
     } catch (e) {
       print('openNativeCompare error: $e');
+    }
+  }
+
+  static Future<void> setMirrorRotation(int degrees) async {
+    try {
+      await _channel.invokeMethod<dynamic>(
+        'setMirrorRotation',
+        {'degrees': degrees},
+      );
+    } catch (e) {
+      print('setMirrorRotation error: $e');
+    }
+  }
+
+  static Future<int?> getMirrorRotation() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getMirrorRotation');
+      if (res is int) return res;
+      if (res is num) return res.toInt();
+      return null;
+    } catch (e) {
+      print('getMirrorRotation error: $e');
+      return null;
+    }
+  }
+
+  static Future<void> setPreferredMirrorDisplay(int displayId) async {
+    try {
+      await _channel.invokeMethod<dynamic>(
+        'setPreferredMirrorDisplay',
+        {'display_id': displayId},
+      );
+    } catch (e) {
+      print('setPreferredMirrorDisplay error: $e');
+    }
+  }
+
+  static Future<int?> getPreferredMirrorDisplay() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getPreferredMirrorDisplay');
+      if (res is int) return res;
+      if (res is num) return res.toInt();
+      return null;
+    } catch (e) {
+      print('getPreferredMirrorDisplay error: $e');
+      return null;
+    }
+  }
+
+  static Future<void> clearPreferredMirrorDisplay() async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearPreferredMirrorDisplay');
+    } catch (e) {
+      print('clearPreferredMirrorDisplay error: $e');
     }
   }
 }

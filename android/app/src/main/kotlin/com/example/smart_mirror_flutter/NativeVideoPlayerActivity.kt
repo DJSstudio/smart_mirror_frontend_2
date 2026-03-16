@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.Gravity
 import android.view.TextureView
 import android.view.View
@@ -14,6 +15,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
@@ -31,8 +33,10 @@ class NativeVideoPlayerActivity : Activity() {
     private lateinit var playPause: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeText: TextView
+    private lateinit var mirrorDisplayManager: MirrorDisplayManager
     private val handler = Handler(Looper.getMainLooper())
     private var isSeeking = false
+    private lateinit var sourcePath: String
 
     private val updateRunnable = object : Runnable {
         override fun run() {
@@ -49,6 +53,14 @@ class NativeVideoPlayerActivity : Activity() {
             finish()
             return
         }
+        sourcePath = source
+        mirrorDisplayManager = MirrorDisplayManager(this).apply {
+            setCurrentDisplayId(display?.displayId ?: Display.DEFAULT_DISPLAY)
+            val preferred = getSharedPreferences("mirror_settings", MODE_PRIVATE)
+                .getInt("mirror_display_id", -1)
+            setPreferredDisplayId(preferred)
+        }
+        mirrorDisplayManager.playVideo(source)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
@@ -78,6 +90,14 @@ class NativeVideoPlayerActivity : Activity() {
         }
         val backParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.START)
         root.addView(back, backParams)
+
+        val rotate = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_always_landscape_portrait)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { cycleMirrorRotation() }
+        }
+        val rotateParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.END)
+        root.addView(rotate, rotateParams)
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -178,6 +198,7 @@ class NativeVideoPlayerActivity : Activity() {
 
     override fun onDestroy() {
         player.release()
+        mirrorDisplayManager.showIdle()
         super.onDestroy()
     }
 
@@ -185,6 +206,9 @@ class NativeVideoPlayerActivity : Activity() {
         if (player.isPlaying) {
             player.pause()
         } else {
+            if (player.playbackState == Player.STATE_ENDED) {
+                player.seekTo(0)
+            }
             player.play()
         }
     }
@@ -215,5 +239,14 @@ class NativeVideoPlayerActivity : Activity() {
         val minutes = (totalSeconds / 60).toInt()
         val seconds = (totalSeconds % 60).toInt()
         return String.format("%02d:%02d", minutes, seconds)
+    }
+
+    private fun cycleMirrorRotation() {
+        val prefs = getSharedPreferences("mirror_settings", MODE_PRIVATE)
+        val current = prefs.getInt("mirror_rotation", 90)
+        val next = (current + 90) % 360
+        prefs.edit().putInt("mirror_rotation", next).apply()
+        mirrorDisplayManager.playVideo(sourcePath)
+        Toast.makeText(this, "Mirror rotation: ${next}°", Toast.LENGTH_SHORT).show()
     }
 }

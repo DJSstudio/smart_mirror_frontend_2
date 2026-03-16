@@ -2,14 +2,18 @@ package com.example.smart_mirror_flutter
 
 import android.app.Activity
 import android.graphics.Color
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.VideoView
+import android.widget.TextView
+import android.view.TextureView
+import com.google.android.exoplayer2.ExoPlayer
+import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.video.VideoSize
+import kotlin.math.min
 
 class MirrorActivity : Activity() {
 
@@ -20,6 +24,7 @@ class MirrorActivity : Activity() {
         const val EXTRA_TARGET_DISPLAY_ID = "target_display_id"
 
         const val MODE_IDLE = "idle"
+        const val MODE_RECORD = "record"
         const val MODE_PLAY = "play"
         const val MODE_COMPARE = "compare"
 
@@ -33,13 +38,16 @@ class MirrorActivity : Activity() {
 
     private val prefsName = "mirror_status"
     private val prefsKey = "last_status"
+    private val settingsPrefs = "mirror_settings"
+    private val rotationKey = "mirror_rotation"
 
     private lateinit var root: FrameLayout
-    private var singleView: VideoView? = null
-    private var leftView: VideoView? = null
-    private var rightView: VideoView? = null
-    private var leftPrepared = false
-    private var rightPrepared = false
+    private var singleView: TextureView? = null
+    private var leftView: TextureView? = null
+    private var rightView: TextureView? = null
+    private var singlePlayer: ExoPlayer? = null
+    private var leftPlayer: ExoPlayer? = null
+    private var rightPlayer: ExoPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +87,7 @@ class MirrorActivity : Activity() {
                 intent.getStringExtra(EXTRA_LEFT),
                 intent.getStringExtra(EXTRA_RIGHT)
             )
+            MODE_RECORD -> showRecording()
             else -> showIdle()
         }
     }
@@ -104,6 +113,25 @@ class MirrorActivity : Activity() {
         root.setBackgroundColor(Color.BLACK)
     }
 
+    private fun showRecording() {
+        clearPlayers()
+        root.setBackgroundColor(Color.BLACK)
+        val label = TextView(this).apply {
+            text = "Recording..."
+            setTextColor(Color.WHITE)
+            textSize = 24f
+            gravity = Gravity.CENTER
+        }
+        root.addView(
+            label,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
+        )
+    }
+
     private fun playVideo(source: String?) {
         if (source.isNullOrBlank()) {
             showIdle()
@@ -112,18 +140,36 @@ class MirrorActivity : Activity() {
         clearPlayers()
         root.setBackgroundColor(Color.BLACK)
 
-        val view = VideoView(this)
-        view.layoutParams = FrameLayout.LayoutParams(
+        val container = FrameLayout(this)
+        container.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            Gravity.CENTER
+            FrameLayout.LayoutParams.MATCH_PARENT
         )
-
+        val view = TextureView(this)
+        container.addView(
+            view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
+        )
+        root.addView(container)
         singleView = view
-        root.addView(view)
 
-        prepareVideo(view, source) {
-            view.start()
+        singlePlayer = ExoPlayer.Builder(this).build().apply {
+            setVideoTextureView(view)
+            setMediaItem(MediaItem.fromUri(resolveUri(source)))
+            repeatMode = ExoPlayer.REPEAT_MODE_ONE
+            playWhenReady = true
+            addListener(object : com.google.android.exoplayer2.Player.Listener {
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.height <= 0) return
+                    val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
+                    applyRotationAndFit(view, vw, videoSize.height, container)
+                }
+            })
+            prepare()
         }
     }
 
@@ -136,75 +182,152 @@ class MirrorActivity : Activity() {
         clearPlayers()
         root.setBackgroundColor(Color.BLACK)
 
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.layoutParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
+        val rotation = getRotationDegrees()
+        val verticalSplit = rotation == 90 || rotation == 270
+
+        val row = LinearLayout(this).apply {
+            orientation = if (verticalSplit) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val leftContainer = FrameLayout(this)
+        val rightContainer = FrameLayout(this)
+        if (verticalSplit) {
+            leftContainer.layoutParams =
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+            rightContainer.layoutParams =
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        } else {
+            leftContainer.layoutParams =
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            rightContainer.layoutParams =
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        }
+
+        val leftTexture = TextureView(this)
+        val rightTexture = TextureView(this)
+        leftContainer.addView(
+            leftTexture,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
+        )
+        rightContainer.addView(
+            rightTexture,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
         )
 
-        val leftVideo = VideoView(this)
-        val rightVideo = VideoView(this)
-        leftVideo.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-        rightVideo.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        leftView = leftTexture
+        rightView = rightTexture
 
-        leftView = leftVideo
-        rightView = rightVideo
-        leftPrepared = false
-        rightPrepared = false
-
-        row.addView(leftVideo)
-        row.addView(rightVideo)
+        row.addView(leftContainer)
+        row.addView(rightContainer)
         root.addView(row)
 
-        prepareVideo(leftVideo, left) {
-            leftPrepared = true
-            startCompareIfReady()
+        leftPlayer = ExoPlayer.Builder(this).build().apply {
+            setVideoTextureView(leftTexture)
+            setMediaItem(MediaItem.fromUri(resolveUri(left)))
+            repeatMode = ExoPlayer.REPEAT_MODE_ONE
+            playWhenReady = true
+            addListener(object : com.google.android.exoplayer2.Player.Listener {
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.height <= 0) return
+                    val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
+                    applyRotationAndFit(leftTexture, vw, videoSize.height, leftContainer)
+                }
+            })
+            prepare()
         }
 
-        prepareVideo(rightVideo, right) {
-            rightPrepared = true
-            startCompareIfReady()
+        rightPlayer = ExoPlayer.Builder(this).build().apply {
+            setVideoTextureView(rightTexture)
+            setMediaItem(MediaItem.fromUri(resolveUri(right)))
+            repeatMode = ExoPlayer.REPEAT_MODE_ONE
+            playWhenReady = true
+            addListener(object : com.google.android.exoplayer2.Player.Listener {
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.height <= 0) return
+                    val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
+                    applyRotationAndFit(rightTexture, vw, videoSize.height, rightContainer)
+                }
+            })
+            prepare()
         }
     }
 
-    private fun startCompareIfReady() {
-        if (leftPrepared && rightPrepared) {
-            leftView?.seekTo(0)
-            rightView?.seekTo(0)
-            leftView?.start()
-            rightView?.start()
-        }
+    private fun getRotationDegrees(): Int {
+        return getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .getInt(rotationKey, 90)
     }
 
-    private fun prepareVideo(view: VideoView, source: String, onPrepared: () -> Unit) {
-        if (source.startsWith("http", ignoreCase = true)) {
-            view.setVideoURI(Uri.parse(source))
+    private fun applyRotationAndFit(
+        view: TextureView,
+        videoW: Int,
+        videoH: Int,
+        container: FrameLayout
+    ) {
+        if (videoW <= 0 || videoH <= 0) return
+        val cw = container.width
+        val ch = container.height
+        if (cw == 0 || ch == 0) {
+            container.post { applyRotationAndFit(view, videoW, videoH, container) }
+            return
+        }
+
+        val rotation = getRotationDegrees()
+        val aspect = videoW.toFloat() / videoH.toFloat()
+
+        var baseW = cw.toFloat()
+        var baseH = baseW / aspect
+        if (baseH > ch) {
+            baseH = ch.toFloat()
+            baseW = baseH * aspect
+        }
+
+        val lp = FrameLayout.LayoutParams(baseW.toInt(), baseH.toInt(), Gravity.CENTER)
+        view.layoutParams = lp
+        view.pivotX = baseW / 2f
+        view.pivotY = baseH / 2f
+        view.rotation = rotation.toFloat()
+
+        if (rotation == 90 || rotation == 270) {
+            val uniform = min(cw.toFloat() / baseH, ch.toFloat() / baseW)
+            view.scaleX = uniform
+            view.scaleY = uniform
         } else {
-            view.setVideoPath(source)
-        }
-
-        view.setOnPreparedListener { mp: MediaPlayer ->
-            mp.isLooping = false
-            onPrepared()
-        }
-
-        view.setOnErrorListener { _, _, _ ->
-            showIdle()
-            true
+            view.scaleX = 1f
+            view.scaleY = 1f
         }
     }
 
     private fun clearPlayers() {
-        singleView?.stopPlayback()
-        leftView?.stopPlayback()
-        rightView?.stopPlayback()
-        root.removeAllViews()
+        singlePlayer?.release()
+        leftPlayer?.release()
+        rightPlayer?.release()
+        singlePlayer = null
+        leftPlayer = null
+        rightPlayer = null
         singleView = null
         leftView = null
         rightView = null
-        leftPrepared = false
-        rightPrepared = false
+        root.removeAllViews()
+    }
+
+    private fun resolveUri(source: String): Uri {
+        return if (source.startsWith("http", ignoreCase = true)) {
+            Uri.parse(source)
+        } else {
+            Uri.fromFile(java.io.File(source))
+        }
     }
 
     override fun onDestroy() {

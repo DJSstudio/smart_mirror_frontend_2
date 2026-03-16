@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
 import 'screens/qr_display_screen.dart';
@@ -17,6 +18,10 @@ import 'utils/error_logger.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.manual,
+    overlays: [SystemUiOverlay.bottom],
+  );
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     final stack = details.stack;
@@ -61,8 +66,20 @@ class SmartMirrorApp extends StatelessWidget {
           return GalleryScreen(sessionId: args["session_id"]);
         },
         "/video_player": (context) {
-          final url = ModalRoute.of(context)!.settings.arguments as String;
-          return MirrorVideoPlayerScreen(videoUrl: url);
+          final args = ModalRoute.of(context)!.settings.arguments;
+          if (args is String) {
+            return MirrorVideoPlayerScreen(videoUrl: args);
+          }
+          if (args is Map) {
+            return MirrorVideoPlayerScreen(
+              videoUrl: args["url"] as String,
+              playlistUrls: (args["playlist"] as List?)?.cast<String>(),
+              playlistIds: (args["playlistIds"] as List?)?.cast<String>(),
+              startIndex: args["index"] as int?,
+              sessionId: args["session_id"] as String?,
+            );
+          }
+          return const MirrorVideoPlayerScreen(videoUrl: "");
         },
         "/export": (_) => const ExportScreen(),
       },

@@ -1,5 +1,6 @@
 package com.example.smart_mirror_flutter
 
+import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
@@ -25,11 +26,16 @@ class MainActivity : FlutterActivity() {
     private val CRASH_KEY = "last_crash"
     private val MIRROR_STATUS_PREFS = "mirror_status"
     private val MIRROR_STATUS_KEY = "last_status"
+    private val MIRROR_SETTINGS_PREFS = "mirror_settings"
+    private val MIRROR_ROTATION_KEY = "mirror_rotation"
+    private val MIRROR_DISPLAY_KEY = "mirror_display_id"
     private val USB_CAPTURE_PREFS = "usb_capture_status"
     private val USB_CAPTURE_STATUS = "status"
     private val USB_CAPTURE_ERROR = "error"
     private val USB_CAPTURE_PATH = "path"
     private val USB_CAPTURE_TIME = "time_ms"
+    private val USB_CAPTURE_LOGS = "logs"
+    private val USB_CAPTURE_MAX_LOG_LINES = 120
 
     private lateinit var nativeAgent: NativeAgent
     private lateinit var mirrorDisplayManager: MirrorDisplayManager
@@ -96,6 +102,9 @@ class MainActivity : FlutterActivity() {
         val displayId = display?.displayId ?: Display.DEFAULT_DISPLAY
         nativeAgent.setCurrentDisplayId(displayId)
         mirrorDisplayManager.setCurrentDisplayId(displayId)
+        val preferredDisplayId = getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+            .getInt(MIRROR_DISPLAY_KEY, -1)
+        mirrorDisplayManager.setPreferredDisplayId(preferredDisplayId)
 
         // 🔗 Deep link channel → Flutter
         MethodChannel(
@@ -153,6 +162,10 @@ class MainActivity : FlutterActivity() {
                     val ok = mirrorDisplayManager.showIdle()
                     result.success(ok)
                 }
+                "showMirrorRecording" -> {
+                    val ok = mirrorDisplayManager.showRecording()
+                    result.success(ok)
+                }
                 "hideMirror" -> {
                     mirrorDisplayManager.hideMirror()
                     result.success(true)
@@ -165,11 +178,14 @@ class MainActivity : FlutterActivity() {
                     val displays = dm.displays
                     val currentId = display?.displayId ?: Display.DEFAULT_DISPLAY
                     val list = displays.map { d ->
+                        val mode = d.mode
                         mapOf(
                             "id" to d.displayId,
                             "name" to d.name,
                             "flags" to d.flags,
                             "state" to d.state,
+                            "width" to mode.physicalWidth,
+                            "height" to mode.physicalHeight,
                             "isPresentation" to presentationIds.contains(d.displayId),
                             "isDefault" to (d.displayId == Display.DEFAULT_DISPLAY)
                         )
@@ -199,6 +215,49 @@ class MainActivity : FlutterActivity() {
                         .getString(MIRROR_STATUS_KEY, null)
                     result.success(text)
                 }
+                "setMirrorRotation" -> {
+                    val degrees = call.argument<Int>("degrees") ?: 0
+                    val normalized = when (degrees) {
+                        90, 180, 270 -> degrees
+                        else -> 0
+                    }
+                    getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .edit()
+                        .putInt(MIRROR_ROTATION_KEY, normalized)
+                        .apply()
+                    result.success(true)
+                }
+                "getMirrorRotation" -> {
+                    val value = getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .getInt(MIRROR_ROTATION_KEY, 0)
+                    result.success(value)
+                }
+                "setPreferredMirrorDisplay" -> {
+                    val displayId = call.argument<Int>("display_id") ?: -1
+                    getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .edit()
+                        .putInt(MIRROR_DISPLAY_KEY, displayId)
+                        .apply()
+                    if (::mirrorDisplayManager.isInitialized) {
+                        mirrorDisplayManager.setPreferredDisplayId(displayId)
+                    }
+                    result.success(true)
+                }
+                "getPreferredMirrorDisplay" -> {
+                    val value = getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .getInt(MIRROR_DISPLAY_KEY, -1)
+                    result.success(value)
+                }
+                "clearPreferredMirrorDisplay" -> {
+                    getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .edit()
+                        .remove(MIRROR_DISPLAY_KEY)
+                        .apply()
+                    if (::mirrorDisplayManager.isInitialized) {
+                        mirrorDisplayManager.setPreferredDisplayId(-1)
+                    }
+                    result.success(true)
+                }
                 "clearMirrorStatus" -> {
                     getSharedPreferences(MIRROR_STATUS_PREFS, MODE_PRIVATE)
                         .edit()
@@ -220,6 +279,13 @@ class MainActivity : FlutterActivity() {
                             "time_ms" to timeMs
                         )
                     )
+                }
+                "getUsbCaptureLogs" -> {
+                    val raw = getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
+                        .getString(USB_CAPTURE_LOGS, "")
+                        ?: ""
+                    val lines = raw.lines().filter { it.isNotBlank() }
+                    result.success(lines)
                 }
                 "clearLastUsbCaptureStatus" -> {
                     getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
@@ -330,12 +396,38 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun setUsbCaptureStatus(status: String, path: String?, error: String?) {
-        getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
-            .edit()
+        val now = System.currentTimeMillis()
+        val line = buildString {
+            append(now)
+            append(" | ")
+            append(status)
+            if (!error.isNullOrBlank()) {
+                append(" | err=")
+                append(error)
+            }
+            if (!path.isNullOrBlank()) {
+                append(" | path=")
+                append(path)
+            }
+        }
+        val prefs = getSharedPreferences(USB_CAPTURE_PREFS, MODE_PRIVATE)
+        val existing = prefs.getString(USB_CAPTURE_LOGS, "") ?: ""
+        val allLines = (if (existing.isBlank()) line else "$existing\n$line")
+            .split('\n')
+            .filter { it.isNotBlank() }
+        val keepFrom = if (allLines.size > USB_CAPTURE_MAX_LOG_LINES) {
+            allLines.size - USB_CAPTURE_MAX_LOG_LINES
+        } else {
+            0
+        }
+        val merged = allLines.subList(keepFrom, allLines.size).joinToString("\n")
+
+        prefs.edit()
             .putString(USB_CAPTURE_STATUS, status)
             .putString(USB_CAPTURE_PATH, path)
             .putString(USB_CAPTURE_ERROR, error)
-            .putLong(USB_CAPTURE_TIME, System.currentTimeMillis())
+            .putLong(USB_CAPTURE_TIME, now)
+            .putString(USB_CAPTURE_LOGS, merged)
             .apply()
     }
 

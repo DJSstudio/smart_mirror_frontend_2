@@ -122,6 +122,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
   }
 
   Future<void> _doStartRecording(String fname) async {
+    await NativeAgent.showMirrorRecording();
     final ok = await NativeAgent.startRecording(filename: fname);
     if (ok) {
       setState(() {
@@ -131,6 +132,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
       _startTimer();
       ScaffoldMessenger.maybeOf(ref.context)?.showSnackBar(const SnackBar(content: Text("Recording started")));
     } else {
+      await NativeAgent.showMirrorIdle();
       ScaffoldMessenger.maybeOf(ref.context)?.showSnackBar(const SnackBar(content: Text("Failed to start recording")));
     }
   }
@@ -185,6 +187,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
                             _startTime = null;
                             _elapsed = Duration.zero;
                           });
+                          await NativeAgent.showMirrorIdle();
 
                           if (path != null) {
                             ref.read(lastRecordedPathProvider.notifier).state = path;

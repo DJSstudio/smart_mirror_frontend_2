@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.Gravity
 import android.view.TextureView
 import android.widget.FrameLayout
@@ -13,6 +14,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
@@ -35,6 +37,7 @@ class NativeCompareActivity : Activity() {
     private lateinit var playPause: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeText: TextView
+    private lateinit var mirrorDisplayManager: MirrorDisplayManager
     private val handler = Handler(Looper.getMainLooper())
     private var isSeeking = false
     private var desiredPlaying = true
@@ -42,6 +45,8 @@ class NativeCompareActivity : Activity() {
     private var rightDurationMs: Long = 0L
     private var maxDurationMs: Long = 0L
     private var masterIsLeft: Boolean = true
+    private lateinit var leftSource: String
+    private lateinit var rightSource: String
 
     private val updateRunnable = object : Runnable {
         override fun run() {
@@ -59,6 +64,15 @@ class NativeCompareActivity : Activity() {
             finish()
             return
         }
+        leftSource = left
+        rightSource = right
+        mirrorDisplayManager = MirrorDisplayManager(this).apply {
+            setCurrentDisplayId(display?.displayId ?: Display.DEFAULT_DISPLAY)
+            val preferred = getSharedPreferences("mirror_settings", MODE_PRIVATE)
+                .getInt("mirror_display_id", -1)
+            setPreferredDisplayId(preferred)
+        }
+        mirrorDisplayManager.compareVideos(left, right)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
@@ -126,6 +140,14 @@ class NativeCompareActivity : Activity() {
         }
         val backParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.START)
         root.addView(back, backParams)
+
+        val rotate = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_always_landscape_portrait)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { cycleMirrorRotation() }
+        }
+        val rotateParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.END)
+        root.addView(rotate, rotateParams)
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -246,12 +268,18 @@ class NativeCompareActivity : Activity() {
     override fun onDestroy() {
         leftPlayer.release()
         rightPlayer.release()
+        mirrorDisplayManager.showIdle()
         super.onDestroy()
     }
 
     private fun togglePlay() {
         desiredPlaying = !desiredPlaying
         if (desiredPlaying) {
+            updateDurations()
+            val master = if (masterIsLeft) leftPlayer else rightPlayer
+            if (master.playbackState == Player.STATE_ENDED) {
+                seekBoth(0)
+            }
             leftPlayer.play()
             rightPlayer.play()
         } else {
@@ -353,5 +381,14 @@ class NativeCompareActivity : Activity() {
         val minutes = (totalSeconds / 60).toInt()
         val seconds = (totalSeconds % 60).toInt()
         return String.format("%02d:%02d", minutes, seconds)
+    }
+
+    private fun cycleMirrorRotation() {
+        val prefs = getSharedPreferences("mirror_settings", MODE_PRIVATE)
+        val current = prefs.getInt("mirror_rotation", 90)
+        val next = (current + 90) % 360
+        prefs.edit().putInt("mirror_rotation", next).apply()
+        mirrorDisplayManager.compareVideos(leftSource, rightSource)
+        Toast.makeText(this, "Mirror rotation: ${next}°", Toast.LENGTH_SHORT).show()
     }
 }

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../native/native_agent.dart';
 import '../state/recording_provider.dart';
@@ -26,6 +28,12 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
   String? _statusText;
   String? _errorText;
   Timer? _statusTimer;
+  String? _previewPath;
+  VideoPlayerController? _previewController;
+  bool _saving = false;
+  final List<String> _failureLogs = [];
+  List<String> _nativeLogs = const [];
+  String? _lastStatusSignature;
 
   @override
   void initState() {
@@ -41,6 +49,7 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
   @override
   void dispose() {
     _statusTimer?.cancel();
+    _previewController?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -96,6 +105,7 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
       return;
     }
 
+    final signature = "$rawStatus|$error|$path|$timeMs";
     final buffer = StringBuffer("USB status: $rawStatus");
     if (error != null && error.isNotEmpty) {
       buffer.write(" ($error)");
@@ -106,8 +116,41 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
     if (time != null) {
       buffer.write(" @ ${time.toIso8601String()}");
     }
+    if (_lastStatusSignature != signature) {
+      _lastStatusSignature = signature;
+      _appendLog(buffer.toString());
+    }
 
-    setState(() => _statusText = buffer.toString());
+    final logs = await NativeAgent.getUsbCaptureLogs();
+    final parsedLogs = logs
+        .map(_formatNativeLogLine)
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (!mounted) return;
+    setState(() {
+      _statusText = buffer.toString();
+      _nativeLogs = parsedLogs;
+    });
+  }
+
+  String _formatNativeLogLine(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return "";
+    final parts = trimmed.split(" | ");
+    if (parts.isEmpty) return trimmed;
+    final ts = int.tryParse(parts.first);
+    if (ts == null) return trimmed;
+    final at = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
+    if (parts.length == 1) return at;
+    return "$at | ${parts.sublist(1).join(" | ")}";
+  }
+
+  void _appendLog(String line) {
+    final ts = DateTime.now().toIso8601String();
+    _failureLogs.add("[$ts] $line");
+    if (_failureLogs.length > 40) {
+      _failureLogs.removeAt(0);
+    }
   }
 
   void _startStatusPolling() {
@@ -124,6 +167,7 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
 
   Future<void> _startUsbCapture() async {
     if (_isCapturing) return;
+    if (_previewPath != null) return;
     if (_sessionId == null || _sessionId!.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -137,6 +181,14 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
       _isCapturing = true;
       _errorText = null;
     });
+    _appendLog("capture_requested");
+    await NativeAgent.clearLastUsbCaptureStatus();
+    _lastStatusSignature = null;
+    if (mounted) {
+      setState(() {
+        _nativeLogs = const [];
+      });
+    }
 
     final recorder = ref.read(recordingProvider.notifier);
     _startStatusPolling();
@@ -148,15 +200,15 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
 
       if (path == null || path.isEmpty) {
         recorder.reset();
+        _appendLog("capture_canceled");
         setState(() => _errorText = "USB capture canceled.");
         return;
       }
 
-      await recorder.stop(_sessionId!, path);
-      if (!mounted) return;
-      Navigator.pop(context);
+      await _showPreview(path);
     } on PlatformException catch (e) {
       final msg = "USB error: ${e.code}${e.message != null ? " - ${e.message}" : ""}";
+      _appendLog(msg);
       if (mounted) {
         setState(() => _errorText = msg);
         ScaffoldMessenger.of(context)
@@ -164,6 +216,7 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
       }
     } catch (e) {
       final msg = "USB error: $e";
+      _appendLog(msg);
       if (mounted) {
         setState(() => _errorText = msg);
         ScaffoldMessenger.of(context)
@@ -173,8 +226,72 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
       await RecordResumeService.clear();
       _stopStatusPolling();
       await _loadUsbStatus();
+      await NativeAgent.showMirrorIdle();
       if (mounted) {
         setState(() => _isCapturing = false);
+      }
+    }
+  }
+
+  Future<void> _showPreview(String path) async {
+    await _previewController?.dispose();
+    final controller = VideoPlayerController.file(File(path));
+    try {
+      await controller.initialize();
+      controller.setLooping(true);
+      await controller.play();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _previewController = controller;
+      _previewPath = path;
+    });
+  }
+
+  Future<void> _discardPreview() async {
+    final path = _previewPath;
+    await _previewController?.dispose();
+    _previewController = null;
+    _previewPath = null;
+    _errorText = null;
+    if (path != null) {
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _savePreview() async {
+    if (_saving) return;
+    final path = _previewPath;
+    if (_sessionId == null || _sessionId!.isEmpty || path == null) {
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _errorText = null;
+    });
+    final recorder = ref.read(recordingProvider.notifier);
+    try {
+      await recorder.stop(_sessionId!, path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Video saved.")),
+      );
+      await _discardPreview();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _errorText = "Failed to save video: $e");
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
       }
     }
   }
@@ -186,6 +303,18 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
         child: IconButton(
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.arrow_back, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  Widget _guideOverlay() {
+    return IgnorePointer(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _GuideLinesPainter(
+          verticalFracs: const [0.25, 0.75],
+          horizontalFracs: const [0.15, 0.85],
         ),
       ),
     );
@@ -232,6 +361,64 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
           style: const TextStyle(color: Colors.redAccent),
         ),
       ));
+      if (_failureLogs.isNotEmpty) {
+        lines.add(const SizedBox(height: 10));
+        lines.add(Container(
+          width: 520,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.55),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Failure Log",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              SelectableText(
+                _failureLogs.reversed.take(12).toList().reversed.join("\n"),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  height: 1.25,
+                ),
+              ),
+            ],
+          ),
+        ));
+      }
+
+      if (_nativeLogs.isNotEmpty) {
+        lines.add(const SizedBox(height: 10));
+        lines.add(Container(
+          width: 760,
+          constraints: const BoxConstraints(maxHeight: 220),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: SingleChildScrollView(
+            child: SelectableText(
+              _nativeLogs.reversed.take(28).toList().reversed.join("\n"),
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ));
+      }
     }
 
     if (_isCapturing) {
@@ -252,7 +439,7 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
 
   Widget _buildRecordButton() {
     return GestureDetector(
-      onTap: _isCapturing ? null : _startUsbCapture,
+      onTap: _isCapturing || _previewPath != null ? null : _startUsbCapture,
       child: Container(
         width: 96,
         height: 96,
@@ -271,26 +458,150 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
     );
   }
 
+  Widget _buildPreview() {
+    final controller = _previewController;
+    if (_previewPath == null || controller == null) {
+      return const SizedBox.shrink();
+    }
+
+    final video = controller.value.isInitialized
+        ? AspectRatio(
+            aspectRatio: controller.value.aspectRatio,
+            child: VideoPlayer(controller),
+          )
+        : const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white12,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: SizedBox(
+            width: 420,
+            height: 240,
+            child: Center(child: video),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            OutlinedButton(
+              onPressed: _saving ? null : _discardPreview,
+              child: const Text("Record Again"),
+            ),
+            const SizedBox(width: 16),
+            ElevatedButton(
+              onPressed: _saving ? null : _savePreview,
+              child: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text("Save Video"),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
+      backgroundColor: const Color(0xFFF2ECE7),
+      body: SafeArea(
+        top: false,
+        child: Stack(
         fit: StackFit.expand,
         children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFFF2ECE7),
+                  Color(0xFFE6DED8),
+                  Color(0xFFF4EEEA),
+                ],
+              ),
+            ),
+          ),
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Text(
+                  "Record Your Look",
+                  style: GoogleFonts.playfairDisplay(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF6B6661),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 _buildStatusText(),
                 const SizedBox(height: 24),
-                _buildRecordButton(),
+                if (_previewPath == null) _buildRecordButton(),
+                if (_previewPath != null) _buildPreview(),
               ],
             ),
           ),
+          _guideOverlay(),
           _buildHeader(),
         ],
       ),
+      ),
     );
   }
+}
+
+class _GuideLinesPainter extends CustomPainter {
+  final List<double> verticalFracs;
+  final List<double> horizontalFracs;
+
+  _GuideLinesPainter({
+    required this.verticalFracs,
+    required this.horizontalFracs,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.45)
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    const dash = 10.0;
+    const gap = 8.0;
+
+    for (final frac in verticalFracs) {
+      final x = size.width * frac;
+      double y = 0;
+      while (y < size.height) {
+        canvas.drawLine(Offset(x, y), Offset(x, y + dash), paint);
+        y += dash + gap;
+      }
+    }
+
+    for (final frac in horizontalFracs) {
+      final y = size.height * frac;
+      double x = 0;
+      while (x < size.width) {
+        canvas.drawLine(Offset(x, y), Offset(x + dash, y), paint);
+        x += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

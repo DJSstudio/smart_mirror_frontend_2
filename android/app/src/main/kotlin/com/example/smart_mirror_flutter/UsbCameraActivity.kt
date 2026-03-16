@@ -1,16 +1,22 @@
 package com.example.smart_mirror_flutter
 
 import android.app.Activity
+import android.app.Presentation
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.Paint
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
+import android.hardware.display.DisplayManager
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.Size
+import android.view.Display
 import android.view.Gravity
 import android.view.Surface
 import android.view.TextureView
@@ -22,7 +28,6 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import android.Manifest
-import java.io.File
 import kotlin.math.abs
 
 class UsbCameraActivity : Activity() {
@@ -64,6 +69,9 @@ class UsbCameraActivity : Activity() {
     private var recordingStartMs: Long? = null
     private var resultSent = false
     private var previewSizeSet = false
+    private var mirrorPresentation: MirrorPreviewPresentation? = null
+    private var mirrorSurface: Surface? = null
+    private var mirrorTextureView: TextureView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,6 +150,7 @@ class UsbCameraActivity : Activity() {
         root.addView(countdownText, countdownParams)
 
         setContentView(root)
+        showMirrorPreview()
     }
 
     override fun onResume() {
@@ -163,6 +172,7 @@ class UsbCameraActivity : Activity() {
         uiHandler.removeCallbacksAndMessages(null)
         closeCamera()
         stopBackgroundThread()
+        dismissMirrorPreview()
         super.onPause()
     }
 
@@ -228,6 +238,7 @@ class UsbCameraActivity : Activity() {
         val size = previewSize
         if (size != null) {
             surfaceTexture.setDefaultBufferSize(size.width, size.height)
+            mirrorTextureView?.surfaceTexture?.setDefaultBufferSize(size.width, size.height)
             runOnUiThread {
                 previewLayout.setAspectRatio(size.width.toFloat() / size.height.toFloat())
                 previewLayout.requestLayout()
@@ -295,15 +306,20 @@ class UsbCameraActivity : Activity() {
 
     private fun createPreviewSession() {
         val camera = cameraDevice ?: return
-        val surfaceTexture = textureView.surfaceTexture ?: return
-        val surface = Surface(surfaceTexture)
+        val surfaceTexture = textureView.surfaceTexture
+        val uiSurface = if (surfaceTexture != null) Surface(surfaceTexture) else null
 
-        val requestBuilder =
-            camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-            }
+        val outputs = mutableListOf<Surface>()
+        if (uiSurface != null) {
+            outputs.add(uiSurface)
+        }
+        mirrorSurface?.let { outputs.add(it) }
+        if (outputs.isEmpty()) return
+        val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            outputs.forEach { addTarget(it) }
+        }
 
-        camera.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+        camera.createCaptureSession(outputs, object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
                 captureSession = session
                 session.setRepeatingRequest(requestBuilder.build(), null, backgroundHandler)
@@ -338,7 +354,6 @@ class UsbCameraActivity : Activity() {
 
     private fun startRecording() {
         val camera = cameraDevice ?: return
-        val surfaceTexture = textureView.surfaceTexture ?: return
         val size = videoSize ?: return
         val path = outputPath ?: return
 
@@ -354,8 +369,11 @@ class UsbCameraActivity : Activity() {
             prepare()
         }
 
-        surfaceTexture.setDefaultBufferSize(size.width, size.height)
-        val previewSurface = Surface(surfaceTexture)
+        val previewSurface = mirrorSurface ?: run {
+            val surfaceTexture = textureView.surfaceTexture ?: return
+            surfaceTexture.setDefaultBufferSize(size.width, size.height)
+            Surface(surfaceTexture)
+        }
         val recorderSurface = mediaRecorder!!.surface
 
         val requestBuilder =
@@ -436,6 +454,41 @@ class UsbCameraActivity : Activity() {
         }, 1000)
     }
 
+    private fun showMirrorPreview() {
+        val dm = getSystemService(DISPLAY_SERVICE) as DisplayManager
+        val displays = dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        if (displays.isEmpty()) return
+
+        val currentId = display?.displayId ?: Display.DEFAULT_DISPLAY
+        val preferredId = getSharedPreferences("mirror_settings", MODE_PRIVATE)
+            .getInt("mirror_display_id", -1)
+        val target = displays.firstOrNull { it.displayId == preferredId }
+            ?: displays.firstOrNull { it.displayId != currentId }
+            ?: return
+
+        mirrorPresentation = MirrorPreviewPresentation(this, target).also { pres ->
+            pres.setOnSurfaceReady { tv ->
+                mirrorTextureView = tv
+                val tex = tv.surfaceTexture ?: return@setOnSurfaceReady
+                previewSize?.let { tex.setDefaultBufferSize(it.width, it.height) }
+                mirrorSurface?.release()
+                mirrorSurface = Surface(tex)
+                if (!isRecording && cameraDevice != null) {
+                    createPreviewSession()
+                }
+            }
+            pres.show()
+        }
+    }
+
+    private fun dismissMirrorPreview() {
+        mirrorSurface?.release()
+        mirrorSurface = null
+        mirrorTextureView = null
+        mirrorPresentation?.dismiss()
+        mirrorPresentation = null
+    }
+
     private fun startTimer() {
         uiHandler.post(object : Runnable {
             override fun run() {
@@ -488,5 +541,78 @@ class UsbCameraActivity : Activity() {
             writeStatus("activity_destroyed", null, outputPath)
         }
         super.onDestroy()
+    }
+
+    private class MirrorPreviewPresentation(
+        context: Context,
+        display: Display
+    ) : Presentation(context, display) {
+        private var onSurfaceReady: ((TextureView) -> Unit)? = null
+        private lateinit var texture: TextureView
+
+        fun setOnSurfaceReady(cb: (TextureView) -> Unit) {
+            onSurfaceReady = cb
+        }
+
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+            val root = FrameLayout(context).apply {
+                setBackgroundColor(Color.BLACK)
+            }
+            texture = TextureView(context)
+            root.addView(
+                texture,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
+            root.addView(
+                GridOverlayView(context),
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
+            setContentView(root)
+
+            texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                    onSurfaceReady?.invoke(texture)
+                }
+
+                override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
+            }
+        }
+    }
+
+    private class GridOverlayView(context: Context) : View(context) {
+        private val paint = Paint().apply {
+            color = Color.WHITE
+            alpha = 160
+            strokeWidth = 2f
+            style = Paint.Style.STROKE
+            pathEffect = DashPathEffect(floatArrayOf(12f, 10f), 0f)
+        }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            val w = width.toFloat()
+            val h = height.toFloat()
+
+            val v1 = w * 0.25f
+            val v2 = w * 0.75f
+            val h1 = h * 0.15f
+            val h2 = h * 0.85f
+
+            canvas.drawLine(v1, 0f, v1, h, paint)
+            canvas.drawLine(v2, 0f, v2, h, paint)
+            canvas.drawLine(0f, h1, w, h1, paint)
+            canvas.drawLine(0f, h2, w, h2, paint)
+        }
     }
 }

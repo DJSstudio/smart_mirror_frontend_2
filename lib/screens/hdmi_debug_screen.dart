@@ -16,6 +16,8 @@ class _HdmiDebugScreenState extends State<HdmiDebugScreen> {
   Map<String, dynamic> _info = {};
   String? _lastResult;
   String? _mirrorStatus;
+  int _rotation = 0;
+  int _preferredDisplayId = -1;
   bool _loading = false;
 
   @override
@@ -38,12 +40,31 @@ class _HdmiDebugScreenState extends State<HdmiDebugScreen> {
     });
     final info = await NativeAgent.getDisplayInfo();
     final status = await NativeAgent.getMirrorStatus();
+    final rotation = await NativeAgent.getMirrorRotation();
+    final preferred = await NativeAgent.getPreferredMirrorDisplay();
     if (!mounted) return;
     setState(() {
       _info = info;
       _mirrorStatus = status;
+      _rotation = rotation ?? 0;
+      _preferredDisplayId = preferred ?? -1;
       _loading = false;
     });
+  }
+
+  Future<void> _setRotation(int degrees) async {
+    await NativeAgent.setMirrorRotation(degrees);
+    await _refreshInfo();
+  }
+
+  Future<void> _setPreferredDisplay(int displayId) async {
+    await NativeAgent.setPreferredMirrorDisplay(displayId);
+    await _refreshInfo();
+  }
+
+  Future<void> _clearPreferredDisplay() async {
+    await NativeAgent.clearPreferredMirrorDisplay();
+    await _refreshInfo();
   }
 
   Future<void> _runAction(String label, Future<bool> Function() action) async {
@@ -92,21 +113,63 @@ class _HdmiDebugScreenState extends State<HdmiDebugScreen> {
             else
               ...displays.map((d) {
                 final map = Map<String, dynamic>.from(d as Map);
+                final id = map["id"];
+                final isPreferred = id == _preferredDisplayId;
+                final isCurrent = id == currentId;
+                final isPresentation = map["isPresentation"] == true;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    "id=${map["id"]} state=${map["state"]} "
-                    "flags=${map["flags"]}\n${map["name"]}",
-                    style: const TextStyle(color: Colors.white54),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "id=$id state=${map["state"]} "
+                        "flags=${map["flags"]} "
+                        "size=${map["width"]}x${map["height"]}\n${map["name"]}",
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: (isCurrent || !isPresentation)
+                                  ? null
+                                  : () => _setPreferredDisplay(id),
+                              child: Text(
+                                isCurrent
+                                    ? "App display"
+                                    : (isPreferred ? "Selected" : "Use this display"),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 );
               }),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _clearPreferredDisplay,
+              child: const Text("Auto-select display"),
+            ),
             const Divider(height: 32),
             if (_mirrorStatus != null)
               Text(
                 "mirrorStatus: $_mirrorStatus",
                 style: const TextStyle(color: Colors.white70),
               ),
+            const SizedBox(height: 8),
+            Text(
+              "rotation: $_rotation°",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "preferredDisplayId: ${_preferredDisplayId == -1 ? 'auto' : _preferredDisplayId}",
+              style: const TextStyle(color: Colors.white70),
+            ),
             if (_mirrorStatus != null) const SizedBox(height: 8),
             if (_lastResult != null)
               Text(
@@ -136,6 +199,18 @@ class _HdmiDebugScreenState extends State<HdmiDebugScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Rotate HDMI (mirror output only)",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Portrait rotation (90°)"),
+              value: _rotation == 90,
+              onChanged: (value) => _setRotation(value ? 90 : 0),
             ),
             const SizedBox(height: 8),
             TextButton(

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
 
 import '../state/gallery_provider.dart';
 import 'video_player_screen.dart';
@@ -28,6 +30,12 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    NativeAgent.showMirrorIdle();
+    super.dispose();
+  }
+
   void _toggleCompareSelection(String videoId) {
     setState(() {
       if (_selectedVideoIds.contains(videoId)) {
@@ -49,237 +57,306 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     return "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
   }
 
+  Future<void> _copyVideoUrl(MirrorVideo video) async {
+    final resolvedUrl = _resolveVideoUrl(video.url);
+    await Clipboard.setData(ClipboardData(text: resolvedUrl));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Video URL copied")),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final videos = ref.watch(galleryProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Gallery"),
-        actions: [
-          if (_selectedVideoIds.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() => _selectedVideoIds.clear()),
-              child: const Text(
-                "Clear",
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-        ],
-      ),
+      backgroundColor: const Color(0xFFF2ECE7),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: videos.isEmpty
-                ? const Center(child: Text("No videos recorded"))
-                : ListView.builder(
-                    itemCount: videos.length,
-                    itemBuilder: (context, index) {
-                      final v = videos[index];
-                      final isSelected = _selectedVideoIds.contains(v.id);
-                      final selectionIndex =
-                          _selectedVideoIds.indexOf(v.id);
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxWidth = constraints.maxWidth;
+            final cardWidth = (maxWidth * 0.94).clamp(360.0, 980.0);
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 26),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back, color: Color(0xFF6B6661)),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // THUMBNAIL
-                              Stack(
-                                children: [
-                                  Container(
-                                    height: 160,
-                                    width: double.infinity,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade900,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: v.thumbnailUrl != null
-                                        ? Image.network(
-                                            v.thumbnailUrl!,
-                                            fit: BoxFit.cover,
-                                            errorBuilder:
-                                                (context, error, stackTrace) {
-                                              return Center(
-                                                child: Icon(
-                                                  Icons.play_circle_outline,
-                                                  size: 64,
-                                                  color: Colors.white70,
-                                                ),
-                                              );
-                                            },
-                                          )
-                                        : const Center(
-                                            child: Icon(
-                                              Icons.play_circle_outline,
-                                              size: 64,
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                  ),
-                                  // Duration Badge
-                                  Positioned(
-                                    bottom: 8,
-                                    left: 8,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.7),
-                                        borderRadius:
-                                            BorderRadius.circular(4),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      child: Text(
-                                        _formatDuration(v.durationSeconds),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
+                        const SizedBox(width: 6),
+                        Text(
+                          "Gallery",
+                          style: GoogleFonts.playfairDisplay(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF6B6661),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_selectedVideoIds.isNotEmpty)
+                          TextButton(
+                            onPressed: () => setState(() => _selectedVideoIds.clear()),
+                            child: Text(
+                              "Clear",
+                              style: GoogleFonts.workSans(
+                                fontSize: 12,
+                                color: const Color(0xFF8C8681),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    width: cardWidth,
+                    margin: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                    padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 26),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7F2EE),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: Colors.white70),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.15),
+                          blurRadius: 18,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          height: 200,
+                          child: videos.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    "No looks recorded yet",
+                                    style: GoogleFonts.workSans(
+                                      fontSize: 14,
+                                      color: const Color(0xFF8C8681),
                                     ),
                                   ),
-                                  if (isSelected)
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: CircleAvatar(
-                                        radius: 14,
-                                        backgroundColor: Colors.blue,
-                                        child: Text(
-                                          "${selectionIndex + 1}",
-                                          style: const TextStyle(
-                                              color: Colors.white),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                                )
+                              : ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: videos.length,
+                                  separatorBuilder: (_, __) => const SizedBox(width: 14),
+                                  itemBuilder: (context, index) {
+                                    final v = videos[index];
+                                    final isSelected = _selectedVideoIds.contains(v.id);
+                                    final selectionIndex =
+                                        _selectedVideoIds.indexOf(v.id);
 
-                              const SizedBox(height: 12),
-
-                              Text(
-                                "Video ${index + 1}",
-                                style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                              Text(
-                                "${v.size ~/ 1024} KB • ${_formatDuration(v.durationSeconds)}",
-                                style: const TextStyle(
-                                    color: Colors.grey),
-                              ),
-
-                              const SizedBox(height: 8),
-
-                              // ACTION ROW
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      icon: const Icon(Icons.play_arrow),
-                                      label: const Text("Play"),
-                                      onPressed: () {
-                                        final resolvedUrl =
-                                            _resolveVideoUrl(v.url);
+                                    return GestureDetector(
+                                      onTap: () {
+                                        final resolvedUrl = _resolveVideoUrl(v.url);
                                         if (Platform.isAndroid) {
+                                          NativeAgent.playOnMirror(resolvedUrl);
                                           NativeAgent.openNativePlayer(resolvedUrl);
                                         } else {
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                              builder: (_) =>
-                                                  MirrorVideoPlayerScreen(
-                                                      videoUrl: resolvedUrl),
+                                              builder: (_) => MirrorVideoPlayerScreen(
+                                                videoUrl: resolvedUrl,
+                                                playlistUrls: videos
+                                                    .map((item) => _resolveVideoUrl(item.url))
+                                                    .toList(),
+                                                playlistIds: videos.map((item) => item.id).toList(),
+                                                startIndex: index,
+                                                sessionId: widget.sessionId,
+                                              ),
                                             ),
                                           );
                                         }
                                       },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      icon: const Icon(Icons.compare),
-                                      label: Text(
-                                        isSelected
-                                            ? "Selected"
-                                            : "Compare",
+                                      onLongPress: () => _toggleCompareSelection(v.id),
+                                      child: Stack(
+                                        children: [
+                                          Container(
+                                            width: 140,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFE5DED8),
+                                              borderRadius: BorderRadius.circular(16),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withOpacity(0.12),
+                                                  blurRadius: 10,
+                                                  offset: const Offset(0, 6),
+                                                ),
+                                              ],
+                                            ),
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(16),
+                                              child: v.thumbnailUrl != null
+                                                  ? Image.network(
+                                                      v.thumbnailUrl!,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (context, error, stack) {
+                                                        return const Center(
+                                                          child: Icon(
+                                                            Icons.play_circle_outline,
+                                                            size: 40,
+                                                            color: Color(0xFF8C8681),
+                                                          ),
+                                                        );
+                                                      },
+                                                    )
+                                                  : const Center(
+                                                      child: Icon(
+                                                        Icons.play_circle_outline,
+                                                        size: 40,
+                                                        color: Color(0xFF8C8681),
+                                                      ),
+                                                    ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            bottom: 8,
+                                            left: 10,
+                                            child: Text(
+                                              "Look ${index + 1}",
+                                              style: GoogleFonts.workSans(
+                                                fontSize: 12,
+                                                color: const Color(0xFF5F5A55),
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            bottom: 8,
+                                            right: 10,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withOpacity(0.55),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                _formatDuration(v.durationSeconds),
+                                                style: GoogleFonts.workSans(
+                                                  fontSize: 10,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 8,
+                                            right: 8,
+                                            child: InkWell(
+                                              onTap: () => _toggleCompareSelection(v.id),
+                                              child: Container(
+                                                width: 26,
+                                                height: 26,
+                                                decoration: BoxDecoration(
+                                                  color: isSelected
+                                                      ? const Color(0xFF8E8077)
+                                                      : Colors.white70,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: Center(
+                                                  child: Text(
+                                                    isSelected ? "${selectionIndex + 1}" : "+",
+                                                    style: GoogleFonts.workSans(
+                                                      fontSize: 12,
+                                                      color: isSelected
+                                                          ? Colors.white
+                                                          : const Color(0xFF6B6661),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 8,
+                                            left: 8,
+                                            child: InkWell(
+                                              onTap: () => _copyVideoUrl(v),
+                                              child: Container(
+                                                width: 26,
+                                                height: 26,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white70,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.content_copy,
+                                                  size: 14,
+                                                  color: Color(0xFF6B6661),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      onPressed: () =>
-                                          _toggleCompareSelection(v.id),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                                    );
+                                  },
+                                ),
                         ),
-                      );
-                    },
-                  ),
-            ),
+                        const SizedBox(height: 18),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _pillAction(
+                              label: "Compare",
+                              enabled: _selectedVideoIds.length == 2,
+                              onPressed: () {
+                                final allVideos = ref.read(galleryProvider);
+                                final selectedVideos = allVideos
+                                    .where((v) => _selectedVideoIds.contains(v.id))
+                                    .toList();
 
-            // COMPARE CTA
-            if (_selectedVideoIds.length == 2)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.compare),
-                    label: const Text("Compare Selected Videos"),
-                    onPressed: () {
-                      // Get the selected video URLs
-                      final allVideos = ref.read(galleryProvider);
-                      final selectedVideos = allVideos
-                          .where((v) => _selectedVideoIds.contains(v.id))
-                          .toList();
-                      
-                      if (selectedVideos.length == 2) {
-                        final left = _resolveVideoUrl(selectedVideos[0].url);
-                        final right = _resolveVideoUrl(selectedVideos[1].url);
-                        if (Platform.isAndroid) {
-                          NativeAgent.openNativeCompare(left, right);
-                        } else {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CompareScreen(
-                                leftPath: left,
-                                rightPath: right,
-                              ),
+                                if (selectedVideos.length == 2) {
+                                  final left = _resolveVideoUrl(selectedVideos[0].url);
+                                  final right = _resolveVideoUrl(selectedVideos[1].url);
+                                  if (Platform.isAndroid) {
+                                    NativeAgent.compareOnMirror(left, right);
+                                    NativeAgent.openNativeCompare(left, right);
+                                  } else {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => CompareScreen(
+                                          leftPath: left,
+                                          rightPath: right,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
                             ),
-                          );
-                        }
-                      }
-                    },
+                            const SizedBox(width: 12),
+                            _pillAction(
+                              label: "Export",
+                              enabled: true,
+                              onPressed: () {
+                                Navigator.pushNamed(context, "/export");
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.download),
-                  label: const Text("Export"),
-                  onPressed: () {
-                    Navigator.pushNamed(context, "/export");
-                  },
-                ),
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -298,4 +375,37 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     }
     return "$root/$trimmed";
   }
+}
+
+Widget _pillAction({
+  required String label,
+  required bool enabled,
+  required VoidCallback onPressed,
+}) {
+  return SizedBox(
+    width: 160,
+    child: ElevatedButton(
+      onPressed: enabled ? onPressed : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFF1EAE6),
+        disabledBackgroundColor: const Color(0xFFE8E1DC),
+        foregroundColor: const Color(0xFF6B6661),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: Color(0xFFE4DDD7)),
+        ),
+        elevation: 6,
+        shadowColor: Colors.black.withOpacity(0.12),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.playfairDisplay(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFF6B6661),
+        ),
+      ),
+    ),
+  );
 }

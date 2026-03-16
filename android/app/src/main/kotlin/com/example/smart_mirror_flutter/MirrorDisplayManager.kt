@@ -11,9 +11,16 @@ class MirrorDisplayManager(private val context: Context) {
 
     private var presentation: MirrorPresentation? = null
     private var currentDisplayId: Int = Display.DEFAULT_DISPLAY
+    private var preferredDisplayId: Int = -1
+    private val settingsPrefs = "mirror_settings"
+    private val displayKey = "mirror_display_id"
 
     fun setCurrentDisplayId(displayId: Int) {
         currentDisplayId = displayId
+    }
+
+    fun setPreferredDisplayId(displayId: Int) {
+        preferredDisplayId = displayId
     }
 
     fun showIdle(): Boolean {
@@ -24,6 +31,17 @@ class MirrorDisplayManager(private val context: Context) {
             true
         } else {
             launchMirrorActivity(display.displayId, MirrorActivity.MODE_IDLE, null, null)
+        }
+    }
+
+    fun showRecording(): Boolean {
+        val display = findExternalDisplay() ?: return false
+        return if (isPresentationDisplay(display.displayId)) {
+            val p = ensurePresentation(display) ?: return false
+            p.showRecording()
+            true
+        } else {
+            launchMirrorActivity(display.displayId, MirrorActivity.MODE_RECORD, null, null)
         }
     }
 
@@ -82,19 +100,61 @@ class MirrorDisplayManager(private val context: Context) {
         val displayManager =
             context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val displays = displayManager.displays
+        val presentationDisplays =
+            displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).toList()
+
+        // Pull latest preference from storage so every caller uses the same pinned target.
+        val storedPreferred = context
+            .getSharedPreferences(settingsPrefs, Context.MODE_PRIVATE)
+            .getInt(displayKey, -1)
+        if (storedPreferred != -1) {
+            preferredDisplayId = storedPreferred
+        }
 
         Log.i("MirrorDisplay", "Current display id=$currentDisplayId total=${displays.size}")
         for (d in displays) {
             Log.i("MirrorDisplay", "Display id=${d.displayId} name=${d.name} flags=${d.flags}")
         }
 
-        val external = displays.firstOrNull { it.displayId != currentDisplayId }
-        if (external == null) {
-            Log.w("MirrorDisplay", "No external display found (count=${displays.size})")
-        } else {
-            Log.i("MirrorDisplay", "Using external display id=${external.displayId} name=${external.name}")
+        if (preferredDisplayId != -1) {
+            val preferred = displays.firstOrNull { it.displayId == preferredDisplayId }
+            if (preferred != null) {
+                if (preferred.displayId == currentDisplayId) {
+                    Log.w("MirrorDisplay", "Preferred display is current display; ignoring")
+                    return null
+                } else if (presentationDisplays.any { it.displayId == preferred.displayId }) {
+                    Log.i("MirrorDisplay", "Using preferred display id=${preferred.displayId} name=${preferred.name}")
+                    return preferred
+                } else {
+                    Log.w("MirrorDisplay", "Preferred display is not a presentation display")
+                    return null
+                }
+            } else {
+                Log.w("MirrorDisplay", "Preferred display id=$preferredDisplayId not found")
+                return null
+            }
         }
-        return external
+
+        // First-run auto-selection: pick largest presentation display that is not current.
+        val candidates = presentationDisplays.filter { it.displayId != currentDisplayId }
+        if (candidates.isEmpty()) {
+            Log.w("MirrorDisplay", "No presentation display candidate found")
+            return null
+        }
+        val selected = candidates.maxByOrNull {
+            val m = it.mode
+            m.physicalWidth * m.physicalHeight
+        } ?: return null
+        preferredDisplayId = selected.displayId
+        context.getSharedPreferences(settingsPrefs, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(displayKey, preferredDisplayId)
+            .apply()
+        Log.i(
+            "MirrorDisplay",
+            "Auto-selected mirror display id=${selected.displayId} name=${selected.name}"
+        )
+        return selected
     }
 
     private fun isPresentationDisplay(displayId: Int): Boolean {
