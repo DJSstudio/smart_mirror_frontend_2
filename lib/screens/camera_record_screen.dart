@@ -298,11 +298,16 @@ class _CameraRecordScreenState extends ConsumerState<CameraRecordScreen>
 
   Widget _buildHeader() {
     return SafeArea(
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: IconButton(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+            ),
+            const Spacer(),
+          ],
         ),
       ),
     );

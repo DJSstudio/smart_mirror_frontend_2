@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import android.Manifest
 import kotlin.math.abs
+import kotlin.math.min
 
 class UsbCameraActivity : Activity() {
 
@@ -47,6 +48,8 @@ class UsbCameraActivity : Activity() {
     private lateinit var previewLayout: AspectRatioFrameLayout
     private lateinit var recordButton: ImageButton
     private lateinit var backButton: ImageButton
+    private lateinit var rotateButton: ImageButton
+    private lateinit var rotationText: TextView
     private lateinit var timerText: TextView
     private lateinit var countdownText: TextView
     private var outputPath: String? = null
@@ -72,6 +75,9 @@ class UsbCameraActivity : Activity() {
     private var mirrorPresentation: MirrorPreviewPresentation? = null
     private var mirrorSurface: Surface? = null
     private var mirrorTextureView: TextureView? = null
+    private var mirrorGridView: View? = null
+    private var mirrorContentView: FrameLayout? = null
+    private var mirrorPreviewFrameView: FrameLayout? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +127,32 @@ class UsbCameraActivity : Activity() {
         }
         val backParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.START)
         root.addView(backButton, backParams)
+
+        rotationText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            text = "ROT ${getMirrorRotationDegrees()}°"
+            setBackgroundColor(0x55000000)
+            setPadding(16, 8, 16, 8)
+        }
+        val rotationTextParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        )
+        rotationTextParams.topMargin = 18
+        rotationTextParams.rightMargin = 110
+        root.addView(rotationText, rotationTextParams)
+
+        rotateButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_rotate)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { cycleMirrorRotation() }
+        }
+        val rotateParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.END)
+        rotateParams.topMargin = 0
+        rotateParams.rightMargin = 0
+        root.addView(rotateButton, rotateParams)
 
         timerText = TextView(this).apply {
             setTextColor(Color.RED)
@@ -242,6 +274,7 @@ class UsbCameraActivity : Activity() {
             runOnUiThread {
                 previewLayout.setAspectRatio(size.width.toFloat() / size.height.toFloat())
                 previewLayout.requestLayout()
+                applyMirrorPreviewRotation()
             }
         }
 
@@ -467,12 +500,16 @@ class UsbCameraActivity : Activity() {
             ?: return
 
         mirrorPresentation = MirrorPreviewPresentation(this, target).also { pres ->
-            pres.setOnSurfaceReady { tv ->
+            pres.setOnSurfaceReady { tv, grid, content, previewFrame ->
                 mirrorTextureView = tv
+                mirrorGridView = grid
+                mirrorContentView = content
+                mirrorPreviewFrameView = previewFrame
                 val tex = tv.surfaceTexture ?: return@setOnSurfaceReady
                 previewSize?.let { tex.setDefaultBufferSize(it.width, it.height) }
                 mirrorSurface?.release()
                 mirrorSurface = Surface(tex)
+                applyMirrorPreviewRotation()
                 if (!isRecording && cameraDevice != null) {
                     createPreviewSession()
                 }
@@ -485,8 +522,101 @@ class UsbCameraActivity : Activity() {
         mirrorSurface?.release()
         mirrorSurface = null
         mirrorTextureView = null
+        mirrorGridView = null
+        mirrorContentView = null
+        mirrorPreviewFrameView = null
         mirrorPresentation?.dismiss()
         mirrorPresentation = null
+    }
+
+    private fun getMirrorRotationDegrees(): Int {
+        return getSharedPreferences("mirror_settings", MODE_PRIVATE)
+            .getInt("mirror_rotation", 0)
+    }
+
+    private fun setMirrorRotationDegrees(value: Int) {
+        val normalized = when (value) {
+            90, 180, 270 -> value
+            else -> 0
+        }
+        getSharedPreferences("mirror_settings", MODE_PRIVATE)
+            .edit()
+            .putInt("mirror_rotation", normalized)
+            .apply()
+        if (::rotationText.isInitialized) {
+            rotationText.text = "ROT ${normalized}°"
+        }
+    }
+
+    private fun cycleMirrorRotation() {
+        val current = getMirrorRotationDegrees()
+        val next = ((current / 90 + 1) % 4) * 90
+        setMirrorRotationDegrees(next)
+        applyMirrorPreviewRotation()
+    }
+
+    private fun applyMirrorPreviewRotation() {
+        val texture = mirrorTextureView ?: return
+        val grid = mirrorGridView ?: return
+        val content = mirrorContentView ?: return
+        val previewFrame = mirrorPreviewFrameView ?: return
+        val size = previewSize ?: videoSize ?: return
+
+        val cw = content.width
+        val ch = content.height
+        if (cw <= 0 || ch <= 0) {
+            content.post { applyMirrorPreviewRotation() }
+            return
+        }
+
+        val userRotation = getMirrorRotationDegrees()
+        val contentRotation = userRotation.toFloat()
+
+        content.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            Gravity.CENTER
+        )
+
+        val portraitAspect = size.height.toFloat() / size.width.toFloat()
+        var frameW = cw.toFloat()
+        var frameH = frameW / portraitAspect
+        if (frameH > ch) {
+            frameH = ch.toFloat()
+            frameW = frameH * portraitAspect
+        }
+
+        previewFrame.layoutParams = FrameLayout.LayoutParams(
+            frameW.toInt(),
+            frameH.toInt(),
+            Gravity.CENTER
+        )
+
+        val childLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            Gravity.CENTER
+        )
+        texture.layoutParams = childLp
+        grid.layoutParams = childLp
+
+        previewFrame.pivotX = frameW / 2f
+        previewFrame.pivotY = frameH / 2f
+        previewFrame.rotation = contentRotation
+        if (userRotation == 90 || userRotation == 270) {
+            val uniform = min(cw.toFloat() / frameH, ch.toFloat() / frameW)
+            previewFrame.scaleX = uniform
+            previewFrame.scaleY = uniform
+        } else {
+            previewFrame.scaleX = 1f
+            previewFrame.scaleY = 1f
+        }
+
+        listOf(texture, grid).forEach { view ->
+            view.rotation = 0f
+            view.scaleX = 1f
+            view.scaleY = 1f
+        }
     }
 
     private fun startTimer() {
@@ -547,10 +677,13 @@ class UsbCameraActivity : Activity() {
         context: Context,
         display: Display
     ) : Presentation(context, display) {
-        private var onSurfaceReady: ((TextureView) -> Unit)? = null
+        private var onSurfaceReady: ((TextureView, View, FrameLayout, FrameLayout) -> Unit)? = null
         private lateinit var texture: TextureView
+        private lateinit var grid: GridOverlayView
+        private lateinit var content: FrameLayout
+        private lateinit var previewFrame: FrameLayout
 
-        fun setOnSurfaceReady(cb: (TextureView) -> Unit) {
+        fun setOnSurfaceReady(cb: (TextureView, View, FrameLayout, FrameLayout) -> Unit) {
             onSurfaceReady = cb
         }
 
@@ -559,8 +692,10 @@ class UsbCameraActivity : Activity() {
             val root = FrameLayout(context).apply {
                 setBackgroundColor(Color.BLACK)
             }
+            content = FrameLayout(context)
+            previewFrame = FrameLayout(context)
             texture = TextureView(context)
-            root.addView(
+            previewFrame.addView(
                 texture,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -568,8 +703,25 @@ class UsbCameraActivity : Activity() {
                     Gravity.CENTER
                 )
             )
+            grid = GridOverlayView(context)
+            previewFrame.addView(
+                grid,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
+            content.addView(
+                previewFrame,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+                )
+            )
             root.addView(
-                GridOverlayView(context),
+                content,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -580,7 +732,7 @@ class UsbCameraActivity : Activity() {
 
             texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                    onSurfaceReady?.invoke(texture)
+                    onSurfaceReady?.invoke(texture, grid, content, previewFrame)
                 }
 
                 override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
