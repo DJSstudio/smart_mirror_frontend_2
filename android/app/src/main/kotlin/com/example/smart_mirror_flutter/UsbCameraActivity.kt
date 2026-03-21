@@ -24,6 +24,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
@@ -128,31 +129,34 @@ class UsbCameraActivity : Activity() {
         val backParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.START)
         root.addView(backButton, backParams)
 
+        val rotationControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(12, 8, 12, 8)
+            setBackgroundColor(Color.argb(150, 0, 0, 0))
+        }
+        rotateButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_always_landscape_portrait)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { cycleMirrorRotation() }
+        }
+        rotationControls.addView(rotateButton, LinearLayout.LayoutParams(96, 96))
         rotationText = TextView(this).apply {
             setTextColor(Color.WHITE)
-            textSize = 13f
-            text = "ROT ${getMirrorRotationDegrees()}°"
-            setBackgroundColor(0x55000000)
-            setPadding(16, 8, 16, 8)
+            textSize = 14f
         }
-        val rotationTextParams = FrameLayout.LayoutParams(
+        val rotationTextParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        rotationTextParams.leftMargin = 8
+        rotationControls.addView(rotationText, rotationTextParams)
+        val rotationParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.END
         )
-        rotationTextParams.topMargin = 18
-        rotationTextParams.rightMargin = 110
-        root.addView(rotationText, rotationTextParams)
-
-        rotateButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_rotate)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { cycleMirrorRotation() }
-        }
-        val rotateParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.END)
-        rotateParams.topMargin = 0
-        rotateParams.rightMargin = 0
-        root.addView(rotateButton, rotateParams)
+        root.addView(rotationControls, rotationParams)
 
         timerText = TextView(this).apply {
             setTextColor(Color.RED)
@@ -182,6 +186,7 @@ class UsbCameraActivity : Activity() {
         root.addView(countdownText, countdownParams)
 
         setContentView(root)
+        updateRotationUi()
         showMirrorPreview()
     }
 
@@ -543,16 +548,25 @@ class UsbCameraActivity : Activity() {
             .edit()
             .putInt("mirror_rotation", normalized)
             .apply()
-        if (::rotationText.isInitialized) {
-            rotationText.text = "ROT ${normalized}°"
-        }
     }
 
     private fun cycleMirrorRotation() {
-        val current = getMirrorRotationDegrees()
-        val next = ((current / 90 + 1) % 4) * 90
+        val next = when (getMirrorRotationDegrees()) {
+            0 -> 90
+            90 -> 180
+            180 -> 270
+            else -> 0
+        }
         setMirrorRotationDegrees(next)
+        updateRotationUi()
         applyMirrorPreviewRotation()
+    }
+
+    private fun updateRotationUi() {
+        if (!::rotationText.isInitialized) return
+        val rotation = getMirrorRotationDegrees()
+        val mode = if (rotation == 90 || rotation == 270) "Portrait" else "Landscape"
+        rotationText.text = "$mode $rotation°"
     }
 
     private fun applyMirrorPreviewRotation() {

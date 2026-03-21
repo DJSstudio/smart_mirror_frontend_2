@@ -29,6 +29,7 @@ class MainActivity : FlutterActivity() {
     private val MIRROR_SETTINGS_PREFS = "mirror_settings"
     private val MIRROR_ROTATION_KEY = "mirror_rotation"
     private val MIRROR_DISPLAY_KEY = "mirror_display_id"
+    private val MIRROR_COMPARE_FIT_CROP_KEY = "mirror_compare_fit_crop"
     private val USB_CAPTURE_PREFS = "usb_capture_status"
     private val USB_CAPTURE_STATUS = "status"
     private val USB_CAPTURE_ERROR = "error"
@@ -231,6 +232,19 @@ class MainActivity : FlutterActivity() {
                     val value = getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
                         .getInt(MIRROR_ROTATION_KEY, 0)
                     result.success(value)
+                }
+                "setMirrorCompareFitCrop" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: true
+                    getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(MIRROR_COMPARE_FIT_CROP_KEY, enabled)
+                        .apply()
+                    result.success(true)
+                }
+                "getMirrorCompareFitCrop" -> {
+                    val enabled = getSharedPreferences(MIRROR_SETTINGS_PREFS, MODE_PRIVATE)
+                        .getBoolean(MIRROR_COMPARE_FIT_CROP_KEY, true)
+                    result.success(enabled)
                 }
                 "setPreferredMirrorDisplay" -> {
                     val displayId = call.argument<Int>("display_id") ?: -1

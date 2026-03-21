@@ -16,9 +16,12 @@ class CompareScreen extends ConsumerStatefulWidget {
 }
 
 class _CompareScreenState extends ConsumerState<CompareScreen> {
+  static const double _compareCropWidthFactor = 0.5;
+  static const double _compareCropHeightFactor = 0.7;
   late VideoPlayerController leftCtrl;
   late VideoPlayerController rightCtrl;
   bool initialized = false;
+  bool _mirrorFitCrop = true;
   Timer? _syncTimer;
   bool _desiredPlaying = false;
   bool _swapped = false;
@@ -29,6 +32,7 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
     print("DEBUG: CompareScreen - Left: ${widget.leftPath}");
     print("DEBUG: CompareScreen - Right: ${widget.rightPath}");
 
+    _loadMirrorCompareMode();
     NativeAgent.compareOnMirror(widget.leftPath, widget.rightPath);
     
     leftCtrl = widget.leftPath.startsWith('http') 
@@ -64,6 +68,24 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
           SnackBar(content: Text("Error loading videos: $error")),
         );
       }
+    });
+  }
+
+  Future<void> _loadMirrorCompareMode() async {
+    final value = await NativeAgent.getMirrorCompareFitCrop();
+    if (!mounted) return;
+    setState(() {
+      _mirrorFitCrop = value ?? true;
+    });
+  }
+
+  Future<void> _toggleMirrorCompareMode() async {
+    final next = !_mirrorFitCrop;
+    await NativeAgent.setMirrorCompareFitCrop(next);
+    await NativeAgent.compareOnMirror(widget.leftPath, widget.rightPath);
+    if (!mounted) return;
+    setState(() {
+      _mirrorFitCrop = next;
     });
   }
 
@@ -330,6 +352,14 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
                                 ),
                                 const SizedBox(width: 10),
                                 _pillIcon(
+                                  icon: _mirrorFitCrop
+                                      ? Icons.fit_screen
+                                      : Icons.crop_free,
+                                  label: _mirrorFitCrop ? "Fit Crop" : "Clip Crop",
+                                  onPressed: _toggleMirrorCompareMode,
+                                ),
+                                const SizedBox(width: 10),
+                                _pillIcon(
                                   icon: Icons.replay_10,
                                   label: "Back",
                                   onPressed: () {
@@ -423,13 +453,19 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                  child: SizedBox(
-                    width: controller.value.size.width,
-                    height: controller.value.size.height,
-                    child: VideoPlayer(controller),
+                child: ClipRect(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
+                    child: Transform.scale(
+                      scaleX: 1 / _compareCropWidthFactor,
+                      scaleY: 1 / _compareCropHeightFactor,
+                      child: SizedBox(
+                        width: controller.value.size.width,
+                        height: controller.value.size.height,
+                        child: VideoPlayer(controller),
+                      ),
+                    ),
                   ),
                 ),
               ),

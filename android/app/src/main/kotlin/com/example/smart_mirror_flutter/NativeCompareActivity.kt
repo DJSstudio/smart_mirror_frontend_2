@@ -21,12 +21,18 @@ import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.video.VideoSize
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.max
 
 class NativeCompareActivity : Activity() {
     companion object {
         const val EXTRA_LEFT = "left"
         const val EXTRA_RIGHT = "right"
     }
+
+    private val settingsPrefs = "mirror_settings"
+    private val compareFitCropKey = "mirror_compare_fit_crop"
+    private val compareCropWidthFactor = 0.7f
+    private val compareCropHeightFactor = 0.5f
 
     private lateinit var leftPlayer: ExoPlayer
     private lateinit var rightPlayer: ExoPlayer
@@ -35,8 +41,11 @@ class NativeCompareActivity : Activity() {
     private lateinit var leftAspect: AspectRatioFrameLayout
     private lateinit var rightAspect: AspectRatioFrameLayout
     private lateinit var playPause: ImageButton
+    private lateinit var rotateButton: ImageButton
+    private lateinit var cropMode: ImageButton
     private lateinit var seekBar: SeekBar
     private lateinit var timeText: TextView
+    private lateinit var rotationText: TextView
     private lateinit var mirrorDisplayManager: MirrorDisplayManager
     private val handler = Handler(Looper.getMainLooper())
     private var isSeeking = false
@@ -47,6 +56,7 @@ class NativeCompareActivity : Activity() {
     private var masterIsLeft: Boolean = true
     private lateinit var leftSource: String
     private lateinit var rightSource: String
+    private var mirrorFitCrop: Boolean = true
 
     private val updateRunnable = object : Runnable {
         override fun run() {
@@ -66,6 +76,8 @@ class NativeCompareActivity : Activity() {
         }
         leftSource = left
         rightSource = right
+        mirrorFitCrop = getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .getBoolean(compareFitCropKey, true)
         mirrorDisplayManager = MirrorDisplayManager(this).apply {
             setCurrentDisplayId(display?.displayId ?: Display.DEFAULT_DISPLAY)
             val preferred = getSharedPreferences("mirror_settings", MODE_PRIVATE)
@@ -141,14 +153,6 @@ class NativeCompareActivity : Activity() {
         val backParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.START)
         root.addView(back, backParams)
 
-        val rotate = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_always_landscape_portrait)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { cycleMirrorRotation() }
-        }
-        val rotateParams = FrameLayout.LayoutParams(100, 100, Gravity.TOP or Gravity.END)
-        root.addView(rotate, rotateParams)
-
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.argb(180, 0, 0, 0))
@@ -167,6 +171,24 @@ class NativeCompareActivity : Activity() {
         }
         controlRow.addView(playPause, LinearLayout.LayoutParams(100, 100))
 
+        rotateButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_always_landscape_portrait)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { cycleMirrorRotation() }
+        }
+        val rotateParams = LinearLayout.LayoutParams(100, 100)
+        rotateParams.leftMargin = 8
+        controlRow.addView(rotateButton, rotateParams)
+
+        cropMode = ImageButton(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { toggleMirrorCompareCropMode() }
+        }
+        updateCropModeButton()
+        val cropModeParams = LinearLayout.LayoutParams(100, 100)
+        cropModeParams.leftMargin = 8
+        controlRow.addView(cropMode, cropModeParams)
+
         timeText = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 14f
@@ -178,6 +200,17 @@ class NativeCompareActivity : Activity() {
         )
         timeParams.leftMargin = 16
         controlRow.addView(timeText, timeParams)
+
+        rotationText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }
+        val rotationParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        rotationParams.leftMargin = 16
+        controlRow.addView(rotationText, rotationParams)
 
         seekBar = SeekBar(this)
         seekBar.max = 1
@@ -214,6 +247,7 @@ class NativeCompareActivity : Activity() {
         root.addView(controls, controlsParams)
 
         setContentView(root)
+        updateRotationUi()
 
         leftPlayer = ExoPlayer.Builder(this).build()
         rightPlayer = ExoPlayer.Builder(this).build()
@@ -240,17 +274,15 @@ class NativeCompareActivity : Activity() {
         leftPlayer.addListener(object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.height == 0) return
-                val ratio = (videoSize.width.toFloat() / videoSize.height.toFloat()) *
-                    videoSize.pixelWidthHeightRatio
-                leftAspect.setAspectRatio(ratio)
+                val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
+                applyRotationAndCropCenter(leftView, vw, videoSize.height, leftAspect)
             }
         })
         rightPlayer.addListener(object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.height == 0) return
-                val ratio = (videoSize.width.toFloat() / videoSize.height.toFloat()) *
-                    videoSize.pixelWidthHeightRatio
-                rightAspect.setAspectRatio(ratio)
+                val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
+                applyRotationAndCropCenter(rightView, vw, videoSize.height, rightAspect)
             }
         })
     }
@@ -383,12 +415,120 @@ class NativeCompareActivity : Activity() {
         return String.format("%02d:%02d", minutes, seconds)
     }
 
-    private fun cycleMirrorRotation() {
-        val prefs = getSharedPreferences("mirror_settings", MODE_PRIVATE)
-        val current = prefs.getInt("mirror_rotation", 90)
-        val next = (current + 90) % 360
-        prefs.edit().putInt("mirror_rotation", next).apply()
+    private fun toggleMirrorCompareCropMode() {
+        mirrorFitCrop = !mirrorFitCrop
+        getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .edit()
+            .putBoolean(compareFitCropKey, mirrorFitCrop)
+            .apply()
+        updateCropModeButton()
         mirrorDisplayManager.compareVideos(leftSource, rightSource)
-        Toast.makeText(this, "Mirror rotation: ${next}°", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            this,
+            if (mirrorFitCrop) "Mirror compare: Crop + Fit" else "Mirror compare: Full Frame",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun updateCropModeButton() {
+        if (!::cropMode.isInitialized) return
+        cropMode.setImageResource(
+            if (mirrorFitCrop) android.R.drawable.ic_menu_crop
+            else android.R.drawable.ic_menu_view
+        )
+        cropMode.contentDescription =
+            if (mirrorFitCrop) "Mirror compare mode: Crop + Fit" else "Mirror compare mode: Full Frame"
+    }
+
+    private fun getMirrorRotationDegrees(): Int {
+        return getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .getInt("mirror_rotation", 0)
+    }
+
+    private fun setMirrorRotationDegrees(value: Int) {
+        val normalized = when (value) {
+            90, 180, 270 -> value
+            else -> 0
+        }
+        getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .edit()
+            .putInt("mirror_rotation", normalized)
+            .apply()
+    }
+
+    private fun cycleMirrorRotation() {
+        val next = when (getMirrorRotationDegrees()) {
+            0 -> 90
+            90 -> 180
+            180 -> 270
+            else -> 0
+        }
+        setMirrorRotationDegrees(next)
+        updateRotationUi()
+        mirrorDisplayManager.compareVideos(leftSource, rightSource)
+    }
+
+    private fun updateRotationUi() {
+        if (!::rotationText.isInitialized) return
+        val rotation = getMirrorRotationDegrees()
+        val mode = if (rotation == 90 || rotation == 270) "Portrait" else "Landscape"
+        rotationText.text = "$mode $rotation°"
+    }
+
+    private fun applyRotationAndCropCenter(
+        view: TextureView,
+        videoW: Int,
+        videoH: Int,
+        container: FrameLayout
+    ) {
+        if (videoW <= 0 || videoH <= 0) return
+        val cw = container.width
+        val ch = container.height
+        if (cw == 0 || ch == 0) {
+            container.post { applyRotationAndCropCenter(view, videoW, videoH, container) }
+            return
+        }
+
+        val rotation = 0
+        val fitCrop = getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .getBoolean(compareFitCropKey, true)
+        val aspect = videoW.toFloat() / videoH.toFloat()
+
+        if (fitCrop) {
+            var baseW = cw.toFloat()
+            var baseH = baseW / aspect
+            if (baseH > ch) {
+                baseH = ch.toFloat()
+                baseW = baseH * aspect
+            }
+
+            val lp = FrameLayout.LayoutParams(baseW.toInt(), baseH.toInt(), Gravity.CENTER)
+            view.layoutParams = lp
+            view.pivotX = baseW / 2f
+            view.pivotY = baseH / 2f
+            view.rotation = rotation.toFloat()
+
+            val widthScale = cw.toFloat() / (baseW * compareCropWidthFactor)
+            val heightScale = ch.toFloat() / (baseH * compareCropHeightFactor)
+            val uniform = kotlin.math.min(widthScale, heightScale)
+            view.scaleX = uniform
+            view.scaleY = uniform
+            return
+        }
+
+        var baseW = cw.toFloat()
+        var baseH = baseW / aspect
+        if (baseH > ch) {
+            baseH = ch.toFloat()
+            baseW = baseH * aspect
+        }
+
+        val lp = FrameLayout.LayoutParams(baseW.toInt(), baseH.toInt(), Gravity.CENTER)
+        view.layoutParams = lp
+        view.pivotX = baseW / 2f
+        view.pivotY = baseH / 2f
+        view.rotation = 0f
+        view.scaleX = 1f
+        view.scaleY = 1f
     }
 }

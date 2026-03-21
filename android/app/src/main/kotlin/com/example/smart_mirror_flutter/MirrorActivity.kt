@@ -13,6 +13,7 @@ import android.view.TextureView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.video.VideoSize
+import kotlin.math.max
 import kotlin.math.min
 
 class MirrorActivity : Activity() {
@@ -40,6 +41,9 @@ class MirrorActivity : Activity() {
     private val prefsKey = "last_status"
     private val settingsPrefs = "mirror_settings"
     private val rotationKey = "mirror_rotation"
+    private val compareFitCropKey = "mirror_compare_fit_crop"
+    private val compareCropWidthFactor = 0.7f
+    private val compareCropHeightFactor = 0.5f
 
     private lateinit var root: FrameLayout
     private var singleView: TextureView? = null
@@ -242,7 +246,7 @@ class MirrorActivity : Activity() {
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
                     if (videoSize.height <= 0) return
                     val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
-                    applyRotationAndFit(leftTexture, vw, videoSize.height, leftContainer)
+                    applyRotationAndCropCenter(leftTexture, vw, videoSize.height, leftContainer)
                 }
             })
             prepare()
@@ -257,7 +261,7 @@ class MirrorActivity : Activity() {
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
                     if (videoSize.height <= 0) return
                     val vw = (videoSize.width * videoSize.pixelWidthHeightRatio).toInt()
-                    applyRotationAndFit(rightTexture, vw, videoSize.height, rightContainer)
+                    applyRotationAndCropCenter(rightTexture, vw, videoSize.height, rightContainer)
                 }
             })
             prepare()
@@ -267,6 +271,11 @@ class MirrorActivity : Activity() {
     private fun getRotationDegrees(): Int {
         return getSharedPreferences(settingsPrefs, MODE_PRIVATE)
             .getInt(rotationKey, 90)
+    }
+
+    private fun getCompareFitCrop(): Boolean {
+        return getSharedPreferences(settingsPrefs, MODE_PRIVATE)
+            .getBoolean(compareFitCropKey, true)
     }
 
     private fun applyRotationAndFit(
@@ -307,6 +316,55 @@ class MirrorActivity : Activity() {
             view.scaleX = 1f
             view.scaleY = 1f
         }
+    }
+
+    private fun applyRotationAndCropCenter(
+        view: TextureView,
+        videoW: Int,
+        videoH: Int,
+        container: FrameLayout
+    ) {
+        if (videoW <= 0 || videoH <= 0) return
+        val cw = container.width
+        val ch = container.height
+        if (cw == 0 || ch == 0) {
+            container.post { applyRotationAndCropCenter(view, videoW, videoH, container) }
+            return
+        }
+
+        val rotation = getRotationDegrees()
+        val aspect = videoW.toFloat() / videoH.toFloat()
+        val quarterTurn = rotation == 90 || rotation == 270
+
+        if (getCompareFitCrop()) {
+            var baseW = cw.toFloat()
+            var baseH = baseW / aspect
+            if (baseH > ch) {
+                baseH = ch.toFloat()
+                baseW = baseH * aspect
+            }
+
+            val lp = FrameLayout.LayoutParams(baseW.toInt(), baseH.toInt(), Gravity.CENTER)
+            view.layoutParams = lp
+            view.pivotX = baseW / 2f
+            view.pivotY = baseH / 2f
+            view.rotation = rotation.toFloat()
+
+            val widthScale: Float
+            val heightScale: Float
+            if (quarterTurn) {
+                widthScale = cw.toFloat() / (baseH * compareCropWidthFactor)
+                heightScale = ch.toFloat() / (baseW * compareCropHeightFactor)
+            } else {
+                widthScale = cw.toFloat() / (baseW * compareCropWidthFactor)
+                heightScale = ch.toFloat() / (baseH * compareCropHeightFactor)
+            }
+            val uniform = min(widthScale, heightScale)
+            view.scaleX = uniform
+            view.scaleY = uniform
+            return
+        }
+        applyRotationAndFit(view, videoW, videoH, container)
     }
 
     private fun clearPlayers() {

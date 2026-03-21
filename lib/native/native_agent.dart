@@ -262,6 +262,28 @@ class NativeAgent {
     }
   }
 
+  static Future<void> setMirrorCompareFitCrop(bool enabled) async {
+    try {
+      await _channel.invokeMethod<dynamic>(
+        'setMirrorCompareFitCrop',
+        {'enabled': enabled},
+      );
+    } catch (e) {
+      print('setMirrorCompareFitCrop error: $e');
+    }
+  }
+
+  static Future<bool?> getMirrorCompareFitCrop() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('getMirrorCompareFitCrop');
+      if (res is bool) return res;
+      return null;
+    } catch (e) {
+      print('getMirrorCompareFitCrop error: $e');
+      return null;
+    }
+  }
+
   static Future<void> setPreferredMirrorDisplay(int displayId) async {
     try {
       await _channel.invokeMethod<dynamic>(

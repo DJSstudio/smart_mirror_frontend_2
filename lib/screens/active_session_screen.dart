@@ -19,12 +19,41 @@ class ActiveSessionScreen extends ConsumerStatefulWidget {
 }
 
 class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
+  bool _portraitMirror = true;
+  int _mirrorRotation = 0;
+
   @override
   void initState() {
     super.initState();
     Future.microtask(() async {
       await NativeAgent.showMirrorIdle();
       await DisplaySelectionService.forceMirrorToLargestExternal();
+      await _loadMirrorOrientation();
+    });
+  }
+
+  Future<void> _loadMirrorOrientation() async {
+    final rotation = await NativeAgent.getMirrorRotation();
+    if (!mounted) return;
+    final normalized = switch (rotation) {
+      90 || 180 || 270 => rotation!,
+      _ => 0,
+    };
+    setState(() {
+      _mirrorRotation = normalized;
+      _portraitMirror = normalized == 90 || normalized == 270;
+    });
+  }
+
+  Future<void> _setGlobalMirrorOrientation(bool portrait) async {
+    final next = portrait
+        ? (_mirrorRotation == 270 ? 270 : 90)
+        : (_mirrorRotation == 180 ? 180 : 0);
+    await NativeAgent.setMirrorRotation(next);
+    if (!mounted) return;
+    setState(() {
+      _mirrorRotation = next;
+      _portraitMirror = portrait;
     });
   }
 
@@ -126,11 +155,12 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
                                 _softButton(
                                   context,
                                   label: "Record Look",
-                                  onPressed: () {
-                                    Navigator.push(
+                                  onPressed: () async {
+                                    await Navigator.push(
                                       context,
                                       MaterialPageRoute(builder: (_) => CameraRecordScreen()),
                                     );
+                                    await _loadMirrorOrientation();
                                   },
                                   textStyle: buttonTextStyle,
                                 ),
@@ -138,14 +168,21 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
                                 _softButton(
                                   context,
                                   label: "Gallery",
-                                  onPressed: () {
-                                    Navigator.pushNamed(
+                                  onPressed: () async {
+                                    await Navigator.pushNamed(
                                       context,
                                       "/gallery",
                                       arguments: {"session_id": session.id},
                                     );
+                                    await _loadMirrorOrientation();
                                   },
                                   textStyle: buttonTextStyle,
+                                ),
+                                const SizedBox(height: 18),
+                                _orientationIndicator(
+                                  portrait: _portraitMirror,
+                                  rotation: _mirrorRotation,
+                                  onChanged: _setGlobalMirrorOrientation,
                                 ),
                                 const SizedBox(height: 18),
                                 Text("Session ID: ${session.id}", style: labelStyle),
@@ -208,6 +245,86 @@ Widget _softButton(
       ),
       onPressed: onPressed,
       child: Text(label, style: textStyle),
+    ),
+  );
+}
+
+Widget _orientationIndicator({
+  required bool portrait,
+  required int rotation,
+  required ValueChanged<bool> onChanged,
+}) {
+  final labelStyle = GoogleFonts.workSans(
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    color: const Color(0xFF6B6661),
+  );
+
+  Widget segment({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFFE7DDD6) : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: labelStyle.copyWith(
+                color: selected ? const Color(0xFF5E5650) : const Color(0xFF8A837E),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(6),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF1EAE6),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFE4DDD7)),
+    ),
+    child: Column(
+      children: [
+        Text(
+          "Mirror View: ${portrait ? "Portrait" : "Landscape"} ($rotation°)",
+          style: GoogleFonts.workSans(
+            fontSize: 12,
+            color: const Color(0xFF7A746E),
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            segment(
+              label: "Portrait",
+              selected: portrait,
+              onTap: () => onChanged(true),
+            ),
+            segment(
+              label: "Landscape",
+              selected: !portrait,
+              onTap: () => onChanged(false),
+            ),
+          ],
+        ),
+      ],
     ),
   );
 }
